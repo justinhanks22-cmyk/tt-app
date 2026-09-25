@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { log } from "../log/logger.js";
 
 /**
@@ -80,6 +80,26 @@ export class MarketingApiClient {
     return this.send<T>("POST", path, new URL(this.base + path), body, opts.auth ?? true);
   }
 
+  /**
+   * Multipart upload (upload_type UPLOAD_BY_FILE). `fileField` holds the bytes;
+   * TikTok verifies them against the MD5 in `signatureField`. Dry-run guarded.
+   */
+  async upload<T>(path: string, fields: Record<string, unknown>, fileField: string, signatureField: string): Promise<T | DryRunResult> {
+    const bytes = fields[fileField];
+    if (!(bytes instanceof Buffer)) throw new Error(`${fileField} must be a Buffer`);
+    const meta = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== fileField));
+    const signature = createHash("md5").update(bytes).digest("hex");
+    if (!writesEnabled()) {
+      log("info", "api.dry_run", { method: "POST", path, body: { ...meta, [signatureField]: signature, [fileField]: `<${bytes.length} bytes>` } });
+      return { dryRun: true, path, body: meta };
+    }
+    const form = new FormData();
+    for (const [k, v] of Object.entries(meta)) if (v !== undefined) form.set(k, String(v));
+    form.set(signatureField, signature);
+    form.set(fileField, new Blob([new Uint8Array(bytes)]), String(fields.file_name ?? "upload"));
+    return this.send<T>("POST", path, new URL(this.base + path), form, true);
+  }
+
   private async send<T>(method: string, path: string, url: URL, body: unknown, auth: boolean): Promise<T> {
     if (auth && !this.accessToken) {
       throw new Error("No Marketing API access token. Set TIKTOK_ACCESS_TOKEN or run `npm run auth:api`.");
@@ -87,14 +107,15 @@ export class MarketingApiClient {
     const traceId = randomUUID();
     const headers: Record<string, string> = { Accept: "application/json" };
     if (auth) headers["Access-Token"] = this.accessToken!;
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const isForm = body instanceof FormData;
+    if (body !== undefined && !isForm) headers["Content-Type"] = "application/json";
 
     const query = Object.fromEntries(url.searchParams);
-    log("info", "api.request", { traceId, method, path, query, body });
+    log("info", "api.request", { traceId, method, path, query, body: isForm ? "<multipart>" : body });
     const started = Date.now();
     let res: Response;
     try {
-      res = await this.fetchImpl(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      res = await this.fetchImpl(url, { method, headers, body: body === undefined ? undefined : isForm ? body : JSON.stringify(body) });
     } catch (err) {
       log("error", "api.network_error", { traceId, method, path, error: String(err), cause: String((err as Error).cause ?? "") });
       throw err;

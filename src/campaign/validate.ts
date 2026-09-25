@@ -1,7 +1,8 @@
 import type { Settings } from "../config/schema.js";
 import type { Gateway } from "../tiktok/gateway.js";
 import { isDryRun } from "../tiktok/gateway.js";
-import { adGroupPayload, adPayloads, campaignPayload, type CampaignPlan } from "./plan.js";
+import { cardLabel } from "../creative/displayCard.js";
+import { adGroupPayload, adPayloads, campaignPayload, creativeKey, type CampaignPlan, type SparkCreative } from "./plan.js";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 export interface Check {
@@ -11,17 +12,26 @@ export interface Check {
   detail: string;
 }
 
+type SparkPost = {
+  item_info: { item_id: string; text?: string };
+  auth_info: { ad_auth_status: string; auth_end_time?: string };
+  user_info: { identity_id: string; identity_type: string; tiktok_name?: string };
+};
+
 /** Live facts fetched read-only from TikTok before publishing. */
 export interface LiveFacts {
   advertiser?: { advertiser_id: string; name: string; status: string };
   pixel?: { pixel_id: string; pixel_name: string; events?: { optimization_event?: string; event_type?: string }[] };
-  sparkPosts: Record<string, {
-    item_info: { item_id: string; text?: string };
-    auth_info: { ad_auth_status: string; auth_end_time?: string };
-    user_info: { identity_id: string; identity_type: string; tiktok_name?: string };
-  } | undefined>;
+  sparkPosts: Record<string, SparkPost | undefined>;
   displayCard?: { creative_portfolio_id: string; creative_portfolio_type: string };
+  /** The linked account used for Spark Ads Push (identity/get). */
+  pushIdentity?: { identity_id: string; identity_type: string; display_name?: string; username?: string; available_status?: string; can_push_video?: boolean };
 }
+
+type Post = Extract<SparkCreative, { kind: "post" }>;
+type Upload = Extract<SparkCreative, { kind: "upload" }>;
+const posts = (plan: CampaignPlan) => plan.creatives.filter((c): c is Post => c.kind === "post");
+const uploads = (plan: CampaignPlan) => plan.creatives.filter((c): c is Upload => c.kind === "upload");
 
 export async function fetchLiveFacts(gw: Gateway, plan: CampaignPlan): Promise<LiveFacts> {
   const advertiserId = plan.request.advertiserId;
@@ -33,21 +43,24 @@ export async function fetchLiveFacts(gw: Gateway, plan: CampaignPlan): Promise<L
       return undefined; // a failed read leaves the fact missing, which fails its check
     }
   };
-  const [adv, pixels, card, ...posts] = await Promise.all([
+  const pullPosts = posts(plan);
+  const [adv, pixels, card, identities, ...postLists] = await Promise.all([
     read<{ list: LiveFacts["advertiser"][] }>(gw.call("advertiserInfo", { advertiser_ids: [advertiserId], fields: ["advertiser_id", "name", "status"] })),
     read<{ pixels: NonNullable<LiveFacts["pixel"]>[] }>(gw.call("pixelList", { advertiser_id: advertiserId, pixel_id: plan.request.pixelId })),
-    read<NonNullable<LiveFacts["displayCard"]>>(gw.call("portfolioGet", { advertiser_id: advertiserId, creative_portfolio_id: plan.displayCard.cardId })),
-    ...plan.creatives.map((c) =>
-      read<{ list: NonNullable<LiveFacts["sparkPosts"][string]>[] }>(gw.call("ttVideoList", { advertiser_id: advertiserId, keyword: c.tiktokItemId })),
-    ),
+    plan.displayCard.cardId
+      ? read<NonNullable<LiveFacts["displayCard"]>>(gw.call("portfolioGet", { advertiser_id: advertiserId, creative_portfolio_id: plan.displayCard.cardId }))
+      : Promise.resolve(undefined),
+    uploads(plan).length
+      ? read<{ identity_list: NonNullable<LiveFacts["pushIdentity"]>[] }>(gw.call("identityGet", { advertiser_id: advertiserId, identity_type: plan.identity.identityType, page_size: 100 }))
+      : Promise.resolve(undefined),
+    ...pullPosts.map((c) => read<{ list: SparkPost[] }>(gw.call("ttVideoList", { advertiser_id: advertiserId, keyword: c.tiktokItemId }))),
   ]);
   return {
     advertiser: adv?.list?.[0],
     pixel: pixels?.pixels?.find((p) => p.pixel_id === plan.request.pixelId),
     displayCard: card,
-    sparkPosts: Object.fromEntries(
-      plan.creatives.map((c, i) => [c.tiktokItemId, posts[i]?.list?.find((p) => p.item_info.item_id === c.tiktokItemId)]),
-    ),
+    pushIdentity: identities?.identity_list?.find((i) => i.identity_id === plan.identity.identityId),
+    sparkPosts: Object.fromEntries(pullPosts.map((c, i) => [c.tiktokItemId, postLists[i]?.list?.find((p) => p.item_info.item_id === c.tiktokItemId)])),
   };
 }
 
@@ -60,6 +73,10 @@ export function captionPrices(text: string | undefined): number[] {
   return [...(text ?? "").matchAll(/\$\s?(\d+(?:\.\d{1,2})?)/g)].map((m) => Number(m[1]));
 }
 
+const EMOJI = /\p{Extended_Pictographic}/u;
+/** TikTok's ad text limit (characters). */
+export const AD_TEXT_MAX = 100;
+
 /**
  * The publish gate. Checks the exact payloads that would be sent plus live
  * account state. Any "fail" blocks publishing.
@@ -69,6 +86,8 @@ export function validateCampaign(plan: CampaignPlan, settings: Settings, live: L
   const g = adGroupPayload(plan, "0", "0");
   const ads = adPayloads(plan, "0");
   const req = plan.request;
+  const pull = posts(plan).map((cr) => ({ cr, post: live.sparkPosts[cr.tiktokItemId] }));
+  const push = uploads(plan);
   const checks: Check[] = [];
 
   const savedAdvertiser = settings.advertisers.find((a) => a.advertiserId === req.advertiserId);
@@ -76,19 +95,23 @@ export function validateCampaign(plan: CampaignPlan, settings: Settings, live: L
     !!savedAdvertiser && live.advertiser?.advertiser_id === req.advertiserId && live.advertiser?.status === "STATUS_ENABLE",
     live.advertiser ? `${live.advertiser.name} (${req.advertiserId}), ${live.advertiser.status}` : `${req.advertiserId} could not be read live`));
 
-  const posts = plan.creatives.map((cr) => ({ cr, post: live.sparkPosts[cr.tiktokItemId] }));
-  const wrongIdentity = posts.filter(({ cr, post }) => !post || post.user_info.identity_id !== cr.identityId);
-  checks.push(check(2, "Correct TikTok identity", wrongIdentity.length === 0,
-    wrongIdentity.length === 0
-      ? `All ${posts.length} posts belong to ${plan.identity.label} (${plan.identity.identityType} ${plan.identity.identityId})`
-      : `Not on ${plan.identity.label} or not found: ${wrongIdentity.map((w) => w.cr.tiktokItemId).join(", ")}`));
+  // 2 + 3: identity and Spark authorization, per creative kind.
+  const wrongIdentity = pull.filter(({ cr, post }) => !post || post.user_info.identity_id !== cr.identityId).map(({ cr }) => cr.tiktokItemId);
+  const pushId = live.pushIdentity;
+  const pushIdentityOk = push.length === 0 || (!!pushId && pushId.identity_id === plan.identity.identityId && ["TT_USER", "BC_AUTH_TT"].includes(pushId.identity_type));
+  checks.push(check(2, "Correct TikTok identity", wrongIdentity.length === 0 && pushIdentityOk, [
+    wrongIdentity.length ? `Posts not on ${plan.identity.label} or not found: ${wrongIdentity.join(", ")}` : pull.length ? `${pull.length} post(s) on ${plan.identity.label}` : "",
+    push.length ? (pushIdentityOk ? `${push.length} upload(s) via linked account @${pushId?.username ?? plan.identity.label}` : `${plan.identity.label} is not linked to this ad account as a TikTok account (TT_USER). Link it once in Ads Manager, then save its identity ID.`) : "",
+  ].filter(Boolean).join("; ")));
 
-  const badAuth = posts.filter(({ post }) =>
+  const badAuth = pull.filter(({ post }) =>
     !post || post.auth_info.ad_auth_status !== "AUTHORIZED" ||
     (post.auth_info.auth_end_time !== undefined && new Date(post.auth_info.auth_end_time.replace(" ", "T") + "Z") <= now));
-  checks.push(check(3, "Spark authorization valid", badAuth.length === 0,
-    badAuth.length === 0 ? "All posts AUTHORIZED and unexpired"
-      : `Missing/expired authorization: ${badAuth.map((b) => `${b.cr.tiktokItemId} (${b.post?.auth_info.ad_auth_status ?? "not authorized to this ad account"})`).join(", ")}. Apply the post's Spark code first.`));
+  const pushAuthOk = push.length === 0 || (pushId?.available_status === "AVAILABLE" && pushId.can_push_video === true);
+  checks.push(check(3, "Spark authorization valid", badAuth.length === 0 && pushAuthOk, [
+    badAuth.length ? `Missing/expired: ${badAuth.map((b) => `${b.cr.tiktokItemId} (${b.post?.auth_info.ad_auth_status ?? "not authorized to this ad account"})`).join(", ")}. Apply the post's Spark code first.` : pull.length ? "Posts AUTHORIZED and unexpired" : "",
+    push.length ? (pushAuthOk ? "Linked account can push videos" : `Linked account can't push videos (status ${pushId?.available_status ?? "not linked"}, can_push_video ${pushId?.can_push_video ?? "n/a"})`) : "",
+  ].filter(Boolean).join("; ")));
 
   let lpOk = false;
   let lpDetail = req.landingPageUrl;
@@ -133,21 +156,52 @@ export function validateCampaign(plan: CampaignPlan, settings: Settings, live: L
     ads.every((a) => a.ad_configuration.creative_auto_add_toggle === false && a.ad_configuration.creative_auto_enhancement_strategy_list.length === 0),
     "Auto-added creatives OFF; enhancements [] (no video quality, music refresh, dubbing, image edits)"));
 
-  const cardLive = live.displayCard?.creative_portfolio_type === "CARD" && live.displayCard.creative_portfolio_id === plan.displayCard.cardId;
-  checks.push(check(14, "Display card matches price", cardLive && ads.every((a) => a.interactive_add_on_list[0]!.card_id === plan.displayCard.cardId),
-    cardLive ? `${plan.displayCard.label} (${plan.displayCard.cardId})` : `Card ${plan.displayCard.cardId} not found as a Display Card in this ad account`));
+  if (plan.displayCard.generate) {
+    const ok = plan.displayCard.label === cardLabel(req.price);
+    checks.push(check(14, "Display card matches price", ok,
+      ok ? `${plan.displayCard.label} — generated from the entered price` : `Generated card says "${plan.displayCard.label}" but price is $${req.price}`));
+  } else {
+    const cardLive = live.displayCard?.creative_portfolio_type === "CARD" && live.displayCard.creative_portfolio_id === plan.displayCard.cardId;
+    checks.push(check(14, "Display card matches price", cardLive && ads.every((a) => a.interactive_add_on_list[0]!.card_id === plan.displayCard.cardId),
+      cardLive ? `${plan.displayCard.label} (${plan.displayCard.cardId})` : `Card ${plan.displayCard.cardId} not found as a Display Card in this ad account`));
+  }
 
-  const ids = plan.creatives.map((cr) => cr.tiktokItemId);
-  const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
-  checks.push(check(15, "No duplicate creatives", dupes.length === 0, dupes.length ? `Duplicate post IDs: ${[...new Set(dupes)].join(", ")}` : `${ids.length} unique posts`));
+  const keys = plan.creatives.map(creativeKey);
+  const sourcePosts = push.map((u) => u.video.sourcePostId).filter((x): x is string => !!x);
+  const dupes = [...keys.filter((k, i) => keys.indexOf(k) !== i), ...sourcePosts.filter((k, i) => sourcePosts.indexOf(k) !== i)];
+  checks.push(check(15, "No duplicate creatives", dupes.length === 0,
+    dupes.length ? `Duplicates: ${[...new Set(dupes)].map((d) => d.slice(0, 19)).join(", ")}` : `${keys.length} unique creative(s)`));
 
-  // Extra safety: caption price vs. entered price (warning only).
-  const mismatched = posts.filter(({ post }) => {
-    const prices = captionPrices(post?.item_info.text);
+  // ---- Extra checks for uploaded (Push) creatives ----
+  if (push.length) {
+    const noRights = push.filter((u) => !u.video.rightsConfirmed);
+    checks.push(check("rights", "Rights confirmed for every upload", noRights.length === 0,
+      noRights.length ? `Missing confirmation: ${noRights.map((u) => u.video.sourceUrl ?? u.video.filePath).join(", ")}` : `${push.length} upload(s) confirmed owned/licensed`));
+
+    const tooLong = push.filter((u) => [...u.video.caption].length > AD_TEXT_MAX || u.video.caption.trim() === "");
+    checks.push(check("caption-length", `Caption is 1–${AD_TEXT_MAX} characters`, tooLong.length === 0,
+      tooLong.length ? tooLong.map((u) => `${[...u.video.caption].length} chars: "${u.video.caption.slice(0, 40)}…"`).join("; ") : "All captions fit"));
+
+    const withEmoji = push.filter((u) => EMOJI.test(u.video.caption));
+    checks.push(check("caption-emoji", "Caption has no emoji", withEmoji.length === 0,
+      withEmoji.length ? `${withEmoji.length} caption(s) contain emoji; TikTok's ad text may reject emoji — the exact error will be logged` : "No emoji", true));
+
+    const lowRes = push.filter((u) => Math.min(u.video.width, u.video.height) < 720 || u.video.height <= u.video.width);
+    checks.push(check("video", "Video is vertical and ≥720p", lowRes.length === 0,
+      lowRes.length ? lowRes.map((u) => `${u.video.width}x${u.video.height}`).join(", ") : push.map((u) => `${u.video.width}x${u.video.height}`).join(", "), true));
+  }
+
+  // Caption price vs. entered price (warning only).
+  const captions = [
+    ...pull.map(({ cr, post }) => ({ key: cr.tiktokItemId, text: post?.item_info.text })),
+    ...push.map((u) => ({ key: u.video.sourcePostId ?? u.video.sha256.slice(0, 12), text: u.video.caption })),
+  ];
+  const mismatched = captions.filter(({ text }) => {
+    const prices = captionPrices(text);
     return prices.length > 0 && !prices.includes(req.price);
   });
   checks.push(check("caption", "Caption price matches", mismatched.length === 0,
-    mismatched.length ? mismatched.map((m) => `${m.cr.tiktokItemId}: "${m.post!.item_info.text}"`).join("; ") : "No conflicting price in captions", true));
+    mismatched.length ? mismatched.map((m) => `${m.key}: "${m.text}"`).join("; ") : "No conflicting price in captions", true));
 
   checks.push(check("paused", "Everything created paused", [c, g, ...ads].every((x) => x.operation_status === "DISABLE"),
     "Campaign, ad group and ads are created DISABLED; only PUBLISH enables them"));

@@ -17,7 +17,7 @@ is approved. Only videos you own or are licensed to use are processed.
 | 1. Connect MCP + read Ads account | ✅ verified via the official TikTok MCP connector |
 | 2. Pull advertisers, pixels, campaigns, display cards | ✅ see `docs/account-audit.md` |
 | 3. Campaign creation (dry run) | ✅ `npm run plan -- --request examples/poncho-request.json` |
-| 4. Spark creative handling + display-card generation | next |
+| 4. Spark creative handling + display-card generation | ✅ built (dry run); needs account linking + upload token to go live |
 | 5. Simple interface | — |
 | 6. Full dry-run test | — |
 | 7. Real publishing (after approval) | — |
@@ -61,6 +61,26 @@ or image ads, no recommendations or enhancements, one Spark ad per post
 15 safety checks plus a caption-price warning. `src/campaign/run.ts` creates
 campaign → ad group → ads, all **DISABLED**; `publishCampaign()` stays locked
 until Phase 7.
+
+## Creatives (Phase 4)
+
+- **Linked account (Spark Ads Push):** once @miaclairee_3 is linked to the ad
+  account as a TikTok account, each video is uploaded and pushed through it with
+  its original caption as the ad text and `dark_post_status: OFF`, so it also
+  shows on the profile. No per-video Spark codes are needed.
+- **Existing posts (Spark Ads Pull):** `tiktokItemIds` of posts already
+  authorized to the ad account. `authorizeSparkAd()` applies a creator's code.
+- **Videos:** `ingestCreative()` takes the original file plus the TikTok link.
+  The caption comes from TikTok's official oEmbed. Every video must be marked
+  `rightsConfirmed`. Automatic download from a link is **not** implemented:
+  TikTok blocks non-browser requests, and getting past that means evading its
+  bot protection.
+- **Display cards:** generated from the product photo (the landing page's
+  og:image by default) and the entered price at TikTok's 750×421, uploaded,
+  and registered as a Display Card, so the price can't be wrong. See
+  `examples/display-card-poncho-29.png`.
+- **Uploads** need the Marketing API token (`npm run auth:api`). The MCP
+  server can't send file bytes.
 
 ## Files
 

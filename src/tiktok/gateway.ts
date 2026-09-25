@@ -8,6 +8,13 @@ import { callMcpTool } from "./mcpClient.js";
  * Marketing API path. Tool names come from the connected TikTok for Business
  * MCP server; payload shapes are identical on both routes.
  */
+interface OperationSpec {
+  mcp: string | null;
+  path: string;
+  write: boolean;
+  file?: readonly [fileField: string, signatureField: string];
+}
+
 export const OPERATIONS = {
   advertiserInfo: { mcp: "advertiser_info_get", path: "/advertiser/info/", write: false },
   pixelList: { mcp: "pixel_list_get", path: "/pixel/list/", write: false },
@@ -21,8 +28,15 @@ export const OPERATIONS = {
   smartPlusCampaignGet: { mcp: "smart_plus_campaign_get", path: "/smart_plus/campaign/get/", write: false },
   smartPlusAdgroupGet: { mcp: "smart_plus_adgroup_get", path: "/smart_plus/adgroup/get/", write: false },
   smartPlusAdGet: { mcp: "smart_plus_ad_get", path: "/smart_plus/ad/get/", write: false },
+  identityGet: { mcp: "identity_get", path: "/identity/get/", write: false },
+  identityInfo: { mcp: "identity_info_get", path: "/identity/info/", write: false },
+  identityVideoGet: { mcp: "identity_video_get", path: "/identity/video/get/", write: false },
+  // File uploads send bytes, which only the REST route supports.
+  videoUpload: { mcp: null, path: "/file/video/ad/upload/", write: true, file: ["video_file", "video_signature"] },
+  imageUpload: { mcp: null, path: "/file/image/ad/upload/", write: true, file: ["image_file", "image_signature"] },
+  portfolioCreate: { mcp: "creative_portfolio_create", path: "/creative/portfolio/create/", write: true },
   smartPlusCampaignStatusUpdate: { mcp: "smart_plus_campaign_status_update", path: "/smart_plus/campaign/status/update/", write: true },
-} as const;
+} as const satisfies Record<string, OperationSpec>;
 
 export type Operation = keyof typeof OPERATIONS;
 
@@ -59,11 +73,16 @@ abstract class BaseGateway implements Gateway {
 
 /** Official MCP route (preferred). */
 export class McpGateway extends BaseGateway {
-  constructor(private readonly client: Client) {
+  /** `rest` handles file uploads, which MCP tools can't carry. */
+  constructor(private readonly client: Client, private readonly rest?: RestGateway) {
     super();
   }
   protected async send<T>(op: Operation, payload: Record<string, unknown>): Promise<T> {
-    const { mcp, write } = OPERATIONS[op];
+    const { mcp, write } = OPERATIONS[op] as OperationSpec;
+    if (!mcp) {
+      if (this.rest) return this.rest.call<T>(op, payload) as Promise<T>;
+      throw new Error(`${op} uploads a file, which the MCP server can't do. Set up the Marketing API token (npm run auth:api).`);
+    }
     const result = await callMcpTool(this.client, mcp, payload, write ? "write" : "read");
     if ("dryRun" in result) throw new Error("unreachable: gateway already handled dry run");
     const text = (result.content as { type: string; text?: string }[]).find((c) => c.type === "text")?.text ?? "";
@@ -81,7 +100,8 @@ export class RestGateway extends BaseGateway {
     super();
   }
   protected async send<T>(op: Operation, payload: Record<string, unknown>): Promise<T> {
-    const { path, write } = OPERATIONS[op];
+    const { path, write, file } = OPERATIONS[op] as OperationSpec;
+    if (file) return this.api.upload<T>(path, payload, file[0], file[1]) as Promise<T>;
     if (!write) return this.api.get<T>(path, payload);
     return this.api.post<T>(path, payload) as Promise<T>;
   }

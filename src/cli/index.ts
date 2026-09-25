@@ -7,7 +7,9 @@ import { log } from "../log/logger.js";
 import { API_BASE, MarketingApiClient, writesEnabled } from "../tiktok/marketingApi.js";
 import { callMcpTool, connectMcp, DEFAULT_MCP_URL } from "../tiktok/mcpClient.js";
 import { readFileSync } from "node:fs";
-import { planCampaign, type CampaignRequest } from "../campaign/plan.js";
+import { planCampaign, PlanError, selectDisplayCard, type CampaignRequest } from "../campaign/plan.js";
+import { cardLabel, productImageFromLandingPage, renderDisplayCard } from "../creative/displayCard.js";
+import { ingestCreative } from "../creative/ingest.js";
 import { buildCampaign, reviewSummary } from "../campaign/run.js";
 import { fetchLiveFacts, validateCampaign, type LiveFacts } from "../campaign/validate.js";
 import { McpGateway, type Gateway, type DryRunRecord } from "../tiktok/gateway.js";
@@ -155,9 +157,34 @@ function arg(name: string): string | undefined {
 async function plan(): Promise<void> {
   const reqPath = arg("request");
   if (!reqPath) throw new Error("Usage: plan --request <file.json> [--facts <live.json>]");
-  const request = JSON.parse(readFileSync(reqPath, "utf8")) as CampaignRequest;
+  // Request file: CampaignRequest plus optional
+  //   "videos": [{ "file": "...", "url": "https://www.tiktok.com/...", "rightsConfirmed": true }]
+  //   "productImage": "path.png"  (default: the landing page's product image)
+  const raw = JSON.parse(readFileSync(reqPath, "utf8")) as CampaignRequest & {
+    videos?: { file: string; url?: string; caption?: string; rightsConfirmed?: boolean }[];
+    productImage?: string;
+  };
   const settings = loadSettings();
-  const campaignPlan = planCampaign(settings, request);
+  const uploads = [];
+  for (const v of raw.videos ?? []) {
+    uploads.push(await ingestCreative({ filePath: v.file, url: v.url, caption: v.caption, rightsConfirmed: v.rightsConfirmed === true }));
+  }
+  const request: CampaignRequest = { ...raw, tiktokItemIds: raw.tiktokItemIds ?? [], uploads };
+
+  // Display card: reuse an exact product+price card, otherwise generate one from the price.
+  let generated: { pngPath: string; label: string } | undefined;
+  try {
+    selectDisplayCard(settings, request.advertiserId, request.productName, request.price);
+  } catch (err) {
+    if (!(err instanceof PlanError) || /match/.test(err.message)) throw err;
+    const photo = raw.productImage ? readFileSync(raw.productImage) : await productImageFromLandingPage(request.landingPageUrl);
+    mkdirSync("media/cards", { recursive: true });
+    const pngPath = `media/cards/${request.productName.replace(/[^\w-]+/g, "-").toLowerCase()}-${request.price}.png`;
+    writeFileSync(pngPath, await renderDisplayCard(photo, request.price));
+    generated = { pngPath, label: cardLabel(request.price) };
+    console.log(`Generated display card ${pngPath} (${generated.label})`);
+  }
+  const campaignPlan = planCampaign(settings, request, new Date(), generated);
 
   // Writes are always recorded, never sent, from this command.
   const recorder: Gateway = {

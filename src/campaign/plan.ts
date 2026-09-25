@@ -1,4 +1,5 @@
 import type { Settings } from "../config/schema.js";
+import type { IngestedVideo } from "../creative/ingest.js";
 
 /** What the user enters for one product test. */
 export interface CampaignRequest {
@@ -9,16 +10,21 @@ export interface CampaignRequest {
   landingPageUrl: string;
   /** Posting identity label from settings.postingAccounts (default: first). */
   postingAccount?: string;
-  /** Spark posts: authorized TikTok item IDs on the posting identity. */
+  /** Spark Ads Pull: existing posts already authorized to the ad account. */
   tiktokItemIds: string[];
+  /** Spark Ads Push: videos uploaded through the linked TikTok account. */
+  uploads?: IngestedVideo[];
   dailyBudget?: number;
 }
 
-export interface SparkCreative {
-  tiktokItemId: string;
-  identityType: string;
-  identityId: string;
-}
+export type SparkCreative =
+  | { kind: "post"; tiktokItemId: string; identityType: string; identityId: string }
+  | { kind: "upload"; video: IngestedVideo; identityType: string; identityId: string };
+
+/** IDs TikTok returns for an uploaded video and its cover, keyed by video sha256. */
+export type UploadedAssets = Record<string, { videoId: string; coverImageId: string }>;
+
+export const creativeKey = (c: SparkCreative) => (c.kind === "post" ? c.tiktokItemId : c.video.sha256);
 
 /** Everything needed to create the campaign, fully resolved. */
 export interface CampaignPlan {
@@ -27,7 +33,8 @@ export interface CampaignPlan {
   budget: number;
   identity: { label: string; identityType: string; identityId: string };
   creatives: SparkCreative[];
-  displayCard: { cardId: string; label: string };
+  /** An existing card (cardId) or one the app will generate (`generate`). */
+  displayCard: { cardId?: string; label: string; generate?: { pngPath: string } };
   settings: Settings["defaults"];
   scheduleStartTime: string; // UTC "YYYY-MM-DD HH:MM:SS"
 }
@@ -62,7 +69,7 @@ export function buildNames(settings: Settings, req: CampaignRequest, now: Date) 
   return {
     campaign: renderName(n.campaignTemplate, vars),
     adGroup: renderName(n.adGroupTemplate, vars),
-    ads: req.tiktokItemIds.map((_, i) => renderName(n.adTemplate, { ...vars, n: String(i + 1) })),
+    ads: [...req.tiktokItemIds, ...(req.uploads ?? [])].map((_, i) => renderName(n.adTemplate, { ...vars, n: String(i + 1) })),
   };
 }
 
@@ -71,7 +78,7 @@ export function buildNames(settings: Settings, req: CampaignRequest, now: Date) 
  * for this product and ad account. Never substitutes another offer: no exact
  * match (or more than one) is an error.
  */
-export function selectDisplayCard(settings: Settings, advertiserId: string, productName: string, price: number) {
+export function selectDisplayCard(settings: Settings, advertiserId: string, productName: string, price: number): { cardId: string; label: string } {
   const product = productName.trim().toLowerCase();
   const matches = settings.displayCards.filter(
     (c) => c.advertiserId === advertiserId && c.price === price && c.product?.trim().toLowerCase() === product,
@@ -89,8 +96,17 @@ function utcTimestamp(d: Date): string {
   return d.toISOString().slice(0, 19).replace("T", " ");
 }
 
-export function planCampaign(settings: Settings, req: CampaignRequest, now = new Date()): CampaignPlan {
-  if (req.tiktokItemIds.length === 0) throw new PlanError("At least one Spark post is required.");
+/**
+ * Resolves a request into a plan. `generatedCard` is a card the app rendered
+ * from the price (Phase 4); without it, an exact library match is required.
+ */
+export function planCampaign(
+  settings: Settings,
+  req: CampaignRequest,
+  now = new Date(),
+  generatedCard?: { pngPath: string; label: string },
+): CampaignPlan {
+  if (req.tiktokItemIds.length + (req.uploads?.length ?? 0) === 0) throw new PlanError("At least one creative is required.");
   const account = req.postingAccount
     ? settings.postingAccounts.find((a) => a.label === req.postingAccount)
     : settings.postingAccounts[0];
@@ -102,8 +118,13 @@ export function planCampaign(settings: Settings, req: CampaignRequest, now = new
     names: buildNames(settings, req, now),
     budget: req.dailyBudget ?? settings.defaults.dailyBudget,
     identity: { label: account.label, identityType: account.identityType, identityId: account.identityId },
-    creatives: req.tiktokItemIds.map((id) => ({ tiktokItemId: id, identityType: account.identityType!, identityId: account.identityId! })),
-    displayCard: selectDisplayCard(settings, req.advertiserId, req.productName, req.price),
+    creatives: [
+      ...req.tiktokItemIds.map((id): SparkCreative => ({ kind: "post", tiktokItemId: id, identityType: account.identityType!, identityId: account.identityId! })),
+      ...(req.uploads ?? []).map((video): SparkCreative => ({ kind: "upload", video, identityType: account.identityType!, identityId: account.identityId! })),
+    ],
+    displayCard: generatedCard
+      ? { label: generatedCard.label, generate: { pngPath: generatedCard.pngPath } }
+      : selectDisplayCard(settings, req.advertiserId, req.productName, req.price),
     settings: settings.defaults,
     scheduleStartTime: utcTimestamp(now),
   };
@@ -159,28 +180,46 @@ export function adGroupPayload(plan: CampaignPlan, campaignId: string, requestId
   };
 }
 
-export function adPayloads(plan: CampaignPlan, adGroupId: string) {
+const PLACEHOLDER = { videoId: "<video_id>", coverImageId: "<cover_image_id>" };
+
+function creativeInfo(c: SparkCreative, uploaded: UploadedAssets) {
+  if (c.kind === "post") {
+    // Spark Ads Pull: the post's own caption is shown.
+    return { ad_format: "SINGLE_VIDEO", identity_type: c.identityType, identity_id: c.identityId, tiktok_item_id: c.tiktokItemId };
+  }
+  // Spark Ads Push: uploaded through the linked TikTok account.
+  const ids = uploaded[c.video.sha256] ?? PLACEHOLDER;
+  return {
+    ad_format: "SINGLE_VIDEO",
+    identity_type: c.identityType,
+    identity_id: c.identityId,
+    video_info: { video_id: ids.videoId },
+    image_info: [{ web_uri: ids.coverImageId }],
+  };
+}
+
+export function adPayloads(plan: CampaignPlan, adGroupId: string, uploaded: UploadedAssets = {}, cardId = plan.displayCard.cardId ?? "<generated_card_id>") {
   const groups = plan.settings.oneAdPerCreative ? plan.creatives.map((c) => [c]) : [plan.creatives];
-  return groups.map((creatives, i) => ({
-    advertiser_id: plan.request.advertiserId,
-    adgroup_id: adGroupId,
-    ad_name: plan.settings.oneAdPerCreative ? plan.names.ads[i]! : plan.names.adGroup,
-    creative_list: creatives.map((c) => ({
-      creative_info: {
-        ad_format: "SINGLE_VIDEO",
-        identity_type: c.identityType,
-        identity_id: c.identityId,
-        tiktok_item_id: c.tiktokItemId, // Spark Ads Pull: post caption is kept
+  return groups.map((creatives, i) => {
+    const pushed = creatives.filter((c): c is Extract<SparkCreative, { kind: "upload" }> => c.kind === "upload");
+    return {
+      advertiser_id: plan.request.advertiserId,
+      adgroup_id: adGroupId,
+      ad_name: plan.settings.oneAdPerCreative ? plan.names.ads[i]! : plan.names.adGroup,
+      creative_list: creatives.map((c) => ({ creative_info: creativeInfo(c, uploaded) })),
+      // Push ads carry the original caption as ad text; Pull ads show the post caption.
+      ...(pushed.length ? { ad_text_list: [...new Set(pushed.map((c) => c.video.caption))].slice(0, 5).map((ad_text) => ({ ad_text })) } : {}),
+      landing_page_url_list: [{ landing_page_url: plan.request.landingPageUrl }],
+      interactive_add_on_list: [{ card_id: cardId }],
+      ad_configuration: {
+        call_to_action_id: plan.settings.ctaPortfolioId,
+        product_info_enabled: "UNSET", // continue without products
+        creative_auto_add_toggle: false, // recommendations: auto-added creatives OFF
+        creative_auto_enhancement_strategy_list: [] as string[], // recommendations: enhancements OFF
+        // Push only: OFF = the video also shows on the TikTok profile (not ads-only).
+        ...(pushed.length ? { dark_post_status: "OFF" } : {}),
       },
-    })),
-    landing_page_url_list: [{ landing_page_url: plan.request.landingPageUrl }],
-    interactive_add_on_list: [{ card_id: plan.displayCard.cardId }],
-    ad_configuration: {
-      call_to_action_id: plan.settings.ctaPortfolioId,
-      product_info_enabled: "UNSET", // continue without products
-      creative_auto_add_toggle: false, // recommendations: auto-added creatives OFF
-      creative_auto_enhancement_strategy_list: [], // recommendations: enhancements OFF
-    },
-    operation_status: "DISABLE",
-  }));
+      operation_status: "DISABLE",
+    };
+  });
 }
