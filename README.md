@@ -65,9 +65,10 @@ until Phase 7.
 ## Files
 
 - `config/settings.json` holds saved, non-secret setup: ad accounts, posting
-  accounts, account → pixel mapping, display-card library, landing-page
-  domains, defaults ($50/day, Add to Cart, "Sale ends at midnight!") and the
-  naming template.
+  account (Spark identity), display-card library (product + price → card),
+  landing-page domains, defaults ($50/day, Add to Cart, US, CTA portfolio)
+  and the naming template. Pixels aren't saved: you pick one per campaign
+  and it's re-checked live.
 - `.secrets/` stores OAuth tokens (gitignored, chmod 600).
 - `logs/YYYY-MM-DD.jsonl` records every API/MCP request and response in full,
   with secrets redacted.
