@@ -91,7 +91,7 @@ export interface BuildResult {
 }
 
 /**
- * Display card → uploads → campaign → ad group → ads, all DISABLED. Refuses
+ * Display card → uploads → campaign → ad group → ads, with the launch status. Refuses
  * to start if any validation check failed. In dry run nothing leaves the machine.
  */
 export async function buildCampaign(gw: Gateway, plan: CampaignPlan, checks: Check[]): Promise<BuildResult> {
@@ -110,16 +110,31 @@ export async function buildCampaign(gw: Gateway, plan: CampaignPlan, checks: Che
     : plan.displayCard.cardId!;
   const uploaded = await uploadCreatives(gw, plan);
   const campaignId = await createCampaign(gw, plan);
-  const adGroupId = await createAdGroup(gw, plan, campaignId);
-  const adIds = await createSparkAds(gw, plan, adGroupId, uploaded, cardId);
+  let adGroupId: string;
+  let adIds: string[];
+  try {
+    adGroupId = await createAdGroup(gw, plan, campaignId);
+    adIds = await createSparkAds(gw, plan, adGroupId, uploaded, cardId);
+  } catch (err) {
+    // A live campaign must never be left half-built: pause it, then report.
+    log("error", "campaign.build_failed", { campaignId, error: String(err) });
+    await gw.call("smartPlusCampaignStatusUpdate", {
+      advertiser_id: plan.request.advertiserId, campaign_ids: [campaignId], operation_status: "DISABLE",
+    }).catch((e) => log("error", "campaign.rollback_failed", { campaignId, error: String(e) }));
+    throw new Error(`Build failed after creating campaign ${campaignId}; it was paused. Cause: ${(err as Error).message}`);
+  }
   const result = { campaignId, adGroupId, adIds, cardId, uploaded, dryRun: campaignId.startsWith("DRYRUN-") };
   log("info", "campaign.built", { ...result, name: plan.names.campaign });
   return result;
 }
 
-/** Enabling a built campaign. Locked until the user approves Phase 7. */
-export async function publishCampaign(_gw: Gateway, _build: BuildResult): Promise<never> {
-  throw new Error("Publishing is disabled until Phase 7 is approved.");
+/**
+ * publishCampaign(): validates, then builds everything with the launch status
+ * (ENABLE = live immediately). Real requests are only sent once writes are
+ * enabled (Phase 7); until then it's a dry run.
+ */
+export async function publishCampaign(gw: Gateway, plan: CampaignPlan, checks: Check[]): Promise<BuildResult> {
+  return buildCampaign(gw, plan, checks);
 }
 
 export async function getCampaignStatus(gw: Gateway, advertiserId: string, campaignId: string) {
@@ -153,14 +168,15 @@ export function reviewSummary(plan: CampaignPlan, checks: Check[]) {
       ["Placements", "TikTok only"],
       ["Audience", `Automatic (left alone), ${g.targeting_spec.location_ids.join(", ")}, age ${g.targeting_spec.spc_audience_age}`],
       ["Display card", plan.displayCard.generate ? `${plan.displayCard.label} — new card from ${plan.displayCard.generate.pngPath}` : `${plan.displayCard.label} (${plan.displayCard.cardId})`],
-      ["Ad copy", "Original TikTok caption"],
+      ["Ad copy", pushes.length ? `"${plan.adText}"${pulls.length ? " (existing posts keep their own caption)" : ""}` : "Existing posts keep their own caption"],
+      ["Launch", plan.settings.launchStatus === "ENABLE" ? "Goes LIVE immediately on PUBLISH" : "Created paused"],
       ["CTA portfolio", plan.settings.ctaPortfolioId],
       ["Comments / downloads", `comments ${g.comment_disabled ? "disabled" : "enabled"}, downloads ${g.video_download_disabled ? "disabled" : "enabled"}`],
     ] as [string, string][],
     creatives: plan.creatives.map((x) =>
       x.kind === "post"
         ? { kind: "Existing post", id: x.tiktokItemId, caption: "" }
-        : { kind: "Upload → profile", id: x.video.sourcePostId ?? x.video.sha256.slice(0, 12), caption: x.video.caption },
+        : { kind: "Upload → profile", id: x.video.sourcePostId ?? x.video.sha256.slice(0, 12), caption: plan.adText },
     ),
     toggles: [
       ["Catalog campaign", onOff(c.catalog_enabled)],

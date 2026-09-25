@@ -178,23 +178,22 @@ export function validateCampaign(plan: CampaignPlan, settings: Settings, live: L
     checks.push(check("rights", "Rights confirmed for every upload", noRights.length === 0,
       noRights.length ? `Missing confirmation: ${noRights.map((u) => u.video.sourceUrl ?? u.video.filePath).join(", ")}` : `${push.length} upload(s) confirmed owned/licensed`));
 
-    const tooLong = push.filter((u) => [...u.video.caption].length > AD_TEXT_MAX || u.video.caption.trim() === "");
-    checks.push(check("caption-length", `Caption is 1–${AD_TEXT_MAX} characters`, tooLong.length === 0,
-      tooLong.length ? tooLong.map((u) => `${[...u.video.caption].length} chars: "${u.video.caption.slice(0, 40)}…"`).join("; ") : "All captions fit"));
+    const adTextLen = [...plan.adText].length;
+    checks.push(check("ad-text", `Ad text is 1–${AD_TEXT_MAX} characters`, plan.adText.trim() !== "" && adTextLen <= AD_TEXT_MAX,
+      `"${plan.adText}" (${adTextLen} chars) on ${push.length} uploaded ad(s)`));
 
-    const withEmoji = push.filter((u) => EMOJI.test(u.video.caption));
-    checks.push(check("caption-emoji", "Caption has no emoji", withEmoji.length === 0,
-      withEmoji.length ? `${withEmoji.length} caption(s) contain emoji; TikTok's ad text may reject emoji — the exact error will be logged` : "No emoji", true));
+    checks.push(check("ad-text-emoji", "Ad text has no emoji", !EMOJI.test(plan.adText),
+      EMOJI.test(plan.adText) ? "Ad text contains emoji; TikTok's ad text may reject emoji" : "No emoji", true));
 
     const lowRes = push.filter((u) => Math.min(u.video.width, u.video.height) < 720 || u.video.height <= u.video.width);
     checks.push(check("video", "Video is vertical and ≥720p", lowRes.length === 0,
       lowRes.length ? lowRes.map((u) => `${u.video.width}x${u.video.height}`).join(", ") : push.map((u) => `${u.video.width}x${u.video.height}`).join(", "), true));
   }
 
-  // Caption price vs. entered price (warning only).
+  // Price in any text the viewer sees vs. entered price (warning only).
   const captions = [
     ...pull.map(({ cr, post }) => ({ key: cr.tiktokItemId, text: post?.item_info.text })),
-    ...push.map((u) => ({ key: u.video.sourcePostId ?? u.video.sha256.slice(0, 12), text: u.video.caption })),
+    ...(push.length ? [{ key: "ad text", text: plan.adText }] : []),
   ];
   const mismatched = captions.filter(({ text }) => {
     const prices = captionPrices(text);
@@ -203,8 +202,9 @@ export function validateCampaign(plan: CampaignPlan, settings: Settings, live: L
   checks.push(check("caption", "Caption price matches", mismatched.length === 0,
     mismatched.length ? mismatched.map((m) => `${m.key}: "${m.text}"`).join("; ") : "No conflicting price in captions", true));
 
-  checks.push(check("paused", "Everything created paused", [c, g, ...ads].every((x) => x.operation_status === "DISABLE"),
-    "Campaign, ad group and ads are created DISABLED; only PUBLISH enables them"));
+  const launch = plan.settings.launchStatus;
+  checks.push(check("launch", "Launch status", [c, g, ...ads].every((x) => x.operation_status === launch),
+    launch === "ENABLE" ? "Campaign, ad group and ads go live immediately when PUBLISH is pressed" : "Created paused; enable in Ads Manager"));
 
   return checks;
 }

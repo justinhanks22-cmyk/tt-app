@@ -71,14 +71,15 @@ beforeEach(() => {
 });
 
 describe("Spark Ads Push payload", () => {
-  it("uploads via the linked account, keeps the caption, shows on profile", () => {
+  it("uploads via the linked account with \"Sale ends at midnight!\", shows on profile, goes live", () => {
     const plan = planCampaign(settings(), request(), NOW, generated);
     const [ad] = adPayloads(plan, "G", { ["a".repeat(64)]: { videoId: "v1", coverImageId: "img1" } }, "card1");
     expect(ad!.creative_list[0]!.creative_info).toEqual({
       ad_format: "SINGLE_VIDEO", identity_type: "TT_USER", identity_id: MIA,
       video_info: { video_id: "v1" }, image_info: [{ web_uri: "img1" }],
     });
-    expect(ad!.ad_text_list).toEqual([{ ad_text: "the absolute cutest top and it's only $29 today" }]);
+    expect(ad!.ad_text_list).toEqual([{ ad_text: "Sale ends at midnight!" }]); // never the source caption
+    expect(ad!.operation_status).toBe("ENABLE");
     expect(ad!.ad_configuration).toMatchObject({ dark_post_status: "OFF", product_info_enabled: "UNSET", creative_auto_enhancement_strategy_list: [] });
     expect(ad!.interactive_add_on_list).toEqual([{ card_id: "card1" }]);
   });
@@ -102,17 +103,22 @@ describe("Phase 4 validation", () => {
     expect(failing(plan)).toEqual(["rights"]);
   });
 
-  it("stops on a caption over 100 characters or empty", () => {
-    const plan = planCampaign(settings(), request({ uploads: [video({ caption: "x".repeat(101) })] }), NOW, generated);
-    expect(failing(plan)).toEqual(["caption-length"]);
+  it("uses a per-campaign ad text override", () => {
+    const plan = planCampaign(settings(), request({ adText: "Last day at this price" }), NOW, generated);
+    expect(adPayloads(plan, "G")[0]!.ad_text_list).toEqual([{ ad_text: "Last day at this price" }]);
   });
 
-  it("warns (not fails) on emoji and on a caption price that differs", () => {
+  it("stops on ad text over 100 characters", () => {
+    const plan = planCampaign(settings(), request({ adText: "x".repeat(101) }), NOW, generated);
+    expect(failing(plan)).toEqual(["ad-text"]);
+  });
+
+  it("ignores the source caption's price and emoji; warns on ad text that names another price", () => {
     const plan = planCampaign(settings(), request({ uploads: [video({ caption: "Just $34 today 💫" })] }), NOW, generated);
     const checks = validateCampaign(plan, settings(), live, NOW);
-    expect(checks.find((c) => c.id === "caption-emoji")!.status).toBe("warn");
-    expect(checks.find((c) => c.id === "caption")!.status).toBe("warn");
-    expect(checks.filter((c) => c.status === "fail")).toEqual([]);
+    expect(checks.filter((c) => c.status !== "pass")).toEqual([]);
+    const other = planCampaign(settings(), request({ adText: "Only $34 today" }), NOW, generated);
+    expect(validateCampaign(other, settings(), live, NOW).find((c) => c.id === "caption")!.status).toBe("warn");
   });
 
   it("flags the same source video submitted twice", () => {
@@ -144,6 +150,27 @@ describe("buildCampaign with uploads (dry run)", () => {
     expect(ad.interactive_add_on_list[0]!.card_id).toBe(result.cardId);
     expect(ad.creative_list[0]!.creative_info).toMatchObject({ video_info: { video_id: result.uploaded["a".repeat(64)]!.videoId } });
     expect(reviewSummary(plan, []).toggles).toContainEqual(["Uploads show on profile (not ads-only)", "ON"]);
+  });
+});
+
+describe("live launch safety", () => {
+  it("pauses the campaign if a later step fails, then reports", async () => {
+    class FailingAdGateway extends FakeGateway {
+      override async call(op: Operation, payload: Record<string, unknown>) {
+        if (op === "smartPlusAdCreate") throw new Error("code 40002: invalid ad text");
+        return super.call(op, payload);
+      }
+    }
+    const gw = new FailingAdGateway();
+    const dir = mkdtempSync(join(tmpdir(), "tt-"));
+    const png = join(dir, "card.png");
+    await sharp({ create: { width: 10, height: 10, channels: 3, background: "#fff" } }).png().toFile(png);
+    const cover = join(dir, "c.jpg");
+    await sharp({ create: { width: 10, height: 10, channels: 3, background: "#000" } }).jpeg().toFile(cover);
+    const plan = planCampaign(settings(), request({ uploads: [video({ filePath: png, coverPath: cover })] }), NOW, { pngPath: png, label: cardLabel(29) });
+    await expect(buildCampaign(gw, plan, validateCampaign(plan, settings(), live, NOW))).rejects.toThrow(/was paused.*invalid ad text/);
+    expect(gw.calls.at(-1)).toBe("smartPlusCampaignStatusUpdate");
+    expect(gw.recorded.at(-1)!.payload).toMatchObject({ operation_status: "DISABLE" });
   });
 });
 

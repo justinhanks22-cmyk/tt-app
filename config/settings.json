@@ -35,6 +35,8 @@
     "commentDisabled": true,
     "videoDownloadDisabled": true,
     "ctaPortfolioId": "7689257320064322567",
+    "adText": "Sale ends at midnight!",
+    "launchStatus": "ENABLE",
     "oneAdPerCreative": true
   },
   "naming": {

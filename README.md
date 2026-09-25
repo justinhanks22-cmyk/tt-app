@@ -58,9 +58,10 @@ or image ads, no recommendations or enhancements, one Spark ad per post
 (caption kept), and the exact-price display card.
 
 `src/campaign/plan.ts` builds the payloads. `src/campaign/validate.ts` runs the
-15 safety checks plus a caption-price warning. `src/campaign/run.ts` creates
-campaign → ad group → ads, all **DISABLED**; `publishCampaign()` stays locked
-until Phase 7.
+15 safety checks plus extra creative checks. `src/campaign/run.ts` creates
+campaign → ad group → ads **live (ENABLE)** when PUBLISH is pressed; if a step
+fails after the campaign exists, the campaign is paused automatically. Real
+requests stay locked (dry run) until Phase 7.
 
 ## Creatives (Phase 4)
 
@@ -75,8 +76,8 @@ ad (Spark Ads Push) with the original caption → attach the price card.
   refuses to run if `curl_cffi` is installed. If TikTok blocks the request
   (as it does from cloud servers), it stops and asks for the original file.
   Every link must be marked `rightsConfirmed`.
-- **Caption:** taken from the link via TikTok's official oEmbed, or set with
-  `"caption"` per video.
+- **Ad text:** always "Sale ends at midnight!" (`defaults.adText`), never the
+  source video's caption. Override per campaign with `"adText"`.
 - **Existing posts (Spark Ads Pull):** still supported via `tiktokItemIds`
   (e.g. @miaclairee_3 posts), and `authorizeSparkAd()` applies Spark codes.
 - **Display cards:** generated from the product photo (landing page og:image)

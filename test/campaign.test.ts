@@ -70,10 +70,10 @@ describe("display card selection", () => {
 describe("payloads match the product-test spec", () => {
   const plan = () => planCampaign(s, request({ tiktokItemIds: ["7689255287013903629", "7688472524039949598"] }), NOW);
 
-  it("campaign: Sales/Website, catalog off, CBO $50/day, paused", () => {
+  it("campaign: Sales/Website, catalog off, CBO $50/day, goes live", () => {
     expect(campaignPayload(plan(), "1")).toMatchObject({
       objective_type: "WEB_CONVERSIONS", sales_destination: "WEBSITE", catalog_enabled: false,
-      budget_optimize_on: true, budget_mode: "BUDGET_MODE_DYNAMIC_DAILY_BUDGET", budget: 50, operation_status: "DISABLE",
+      budget_optimize_on: true, budget_mode: "BUDGET_MODE_DYNAMIC_DAILY_BUDGET", budget: 50, operation_status: "ENABLE",
     });
   });
 
@@ -83,7 +83,7 @@ describe("payloads match the product-test spec", () => {
       pixel_id: "7689247033055625234", optimization_goal: "CONVERT", optimization_event: "ON_WEB_CART",
       bid_type: "BID_TYPE_NO_BID", placement_type: "PLACEMENT_TYPE_NORMAL", placements: ["PLACEMENT_TIKTOK"],
       tiktok_subplacements: [], targeting_optimization_mode: "AUTOMATIC", suggestion_audience_enabled: false,
-      schedule_type: "SCHEDULE_FROM_NOW", schedule_start_time: "2026-09-25 13:00:00", operation_status: "DISABLE",
+      schedule_type: "SCHEDULE_FROM_NOW", schedule_start_time: "2026-09-25 13:00:00", operation_status: "ENABLE",
     });
     expect(g).not.toHaveProperty("catalog_id");
   });
@@ -99,8 +99,8 @@ describe("payloads match the product-test spec", () => {
         call_to_action_id: "7689257320064322567", product_info_enabled: "UNSET",
         creative_auto_add_toggle: false, creative_auto_enhancement_strategy_list: [],
       });
-      expect(a.operation_status).toBe("DISABLE");
-      expect(a).not.toHaveProperty("ad_text_list"); // keep the post caption
+      expect(a.operation_status).toBe("ENABLE");
+      expect(a).not.toHaveProperty("ad_text_list"); // existing posts show their own caption
     }
   });
 });

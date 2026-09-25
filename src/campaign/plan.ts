@@ -15,6 +15,8 @@ export interface CampaignRequest {
   /** Spark Ads Push: videos uploaded through the linked TikTok account. */
   uploads?: IngestedVideo[];
   dailyBudget?: number;
+  /** Overrides settings.defaults.adText for this campaign. */
+  adText?: string;
 }
 
 export type SparkCreative =
@@ -37,6 +39,7 @@ export interface CampaignPlan {
   displayCard: { cardId?: string; label: string; generate?: { pngPath: string } };
   settings: Settings["defaults"];
   scheduleStartTime: string; // UTC "YYYY-MM-DD HH:MM:SS"
+  adText: string;
 }
 
 export class PlanError extends Error {}
@@ -127,6 +130,7 @@ export function planCampaign(
       : selectDisplayCard(settings, req.advertiserId, req.productName, req.price),
     settings: settings.defaults,
     scheduleStartTime: utcTimestamp(now),
+    adText: req.adText ?? settings.defaults.adText,
   };
 }
 
@@ -149,7 +153,7 @@ export function campaignPayload(plan: CampaignPlan, requestId = newRequestId()) 
     budget_optimize_on: true, // campaign budget (CBO)
     budget_mode: "BUDGET_MODE_DYNAMIC_DAILY_BUDGET",
     budget: plan.budget,
-    operation_status: "DISABLE", // created paused; enabled only by publishCampaign()
+    operation_status: plan.settings.launchStatus, // ENABLE = live as soon as it's published
   };
 }
 
@@ -176,7 +180,7 @@ export function adGroupPayload(plan: CampaignPlan, campaignId: string, requestId
     schedule_start_time: plan.scheduleStartTime,
     comment_disabled: d.commentDisabled,
     video_download_disabled: d.videoDownloadDisabled,
-    operation_status: "DISABLE",
+    operation_status: d.launchStatus,
   };
 }
 
@@ -207,8 +211,9 @@ export function adPayloads(plan: CampaignPlan, adGroupId: string, uploaded: Uplo
       adgroup_id: adGroupId,
       ad_name: plan.settings.oneAdPerCreative ? plan.names.ads[i]! : plan.names.adGroup,
       creative_list: creatives.map((c) => ({ creative_info: creativeInfo(c, uploaded) })),
-      // Push ads carry the original caption as ad text; Pull ads show the post caption.
-      ...(pushed.length ? { ad_text_list: [...new Set(pushed.map((c) => c.video.caption))].slice(0, 5).map((ad_text) => ({ ad_text })) } : {}),
+      // Uploaded (Push) ads always use the configured ad text, e.g. "Sale ends at midnight!".
+      // Existing posts (Pull) keep their own caption; TikTok shows the post as-is.
+      ...(pushed.length ? { ad_text_list: [{ ad_text: plan.adText }] } : {}),
       landing_page_url_list: [{ landing_page_url: plan.request.landingPageUrl }],
       interactive_add_on_list: [{ card_id: cardId }],
       ad_configuration: {
@@ -219,7 +224,7 @@ export function adPayloads(plan: CampaignPlan, adGroupId: string, uploaded: Uplo
         // Push only: OFF = the video also shows on the TikTok profile (not ads-only).
         ...(pushed.length ? { dark_post_status: "OFF" } : {}),
       },
-      operation_status: "DISABLE",
+      operation_status: plan.settings.launchStatus,
     };
   });
 }

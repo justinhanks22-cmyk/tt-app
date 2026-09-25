@@ -50,6 +50,10 @@ export const DefaultsSchema = z.object({
   videoDownloadDisabled: z.boolean().default(true),
   // Dynamic CTA portfolio required for Spark ads on TikTok placement.
   ctaPortfolioId: z.string().default("7689257320064322567"),
+  // Ad text on every uploaded Spark ad (replaces the source video's caption).
+  adText: z.string().min(1).max(100).default("Sale ends at midnight!"),
+  // Status everything is created with on PUBLISH: ENABLE = live immediately.
+  launchStatus: z.enum(["ENABLE", "DISABLE"]).default("ENABLE"),
   // One ad per creative (true) or one ad holding all creatives (false).
   oneAdPerCreative: z.boolean().default(true),
 });
