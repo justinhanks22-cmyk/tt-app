@@ -1,0 +1,12 @@
+import { describe, expect, it } from "vitest";
+import { SettingsSchema } from "../src/config/schema.js";
+
+describe("settings defaults", () => {
+  it("match the product-test defaults", () => {
+    const s = SettingsSchema.parse({});
+    expect(s.defaults).toMatchObject({ dailyBudget: 50, budgetLevel: "campaign", optimizationEvent: "Add to Cart", adCopy: "Sale ends at midnight!", placements: ["TikTok"] });
+  });
+  it("rejects a display card with neither price nor offer", () => {
+    expect(() => SettingsSchema.parse({ displayCards: [{ advertiserId: "1", cardId: "c", label: "x" }] })).toThrow();
+  });
+});

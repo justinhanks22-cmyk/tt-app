@@ -1,0 +1,26 @@
+{
+  "advertisers": [],
+  "postingAccounts": [],
+  "pixels": [],
+  "displayCards": [],
+  "landingPageDomains": [],
+  "defaults": {
+    "dailyBudget": 50,
+    "budgetLevel": "campaign",
+    "delivery": "Maximum Delivery",
+    "optimizationEvent": "Add to Cart",
+    "adCopy": "Sale ends at midnight!",
+    "placements": [
+      "TikTok"
+    ]
+  },
+  "naming": {
+    "campaignTemplate": "{product} | ${price} | SPARK | {event} | {date}",
+    "adGroupTemplate": "{product} | ${price} | {event}",
+    "adTemplate": "{product} | creative {n}",
+    "dateFormat": "MM-dd",
+    "eventAbbreviations": {
+      "Add to Cart": "ATC"
+    }
+  }
+}

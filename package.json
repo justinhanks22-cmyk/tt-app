@@ -1,0 +1,29 @@
+{
+  "name": "tt-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TikTok Spark Ads product-test automation (official MCP/API first, dry-run by default)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "doctor": "tsx src/cli/index.ts doctor",
+    "auth:api": "tsx src/cli/index.ts auth:api",
+    "auth:mcp": "tsx src/cli/index.ts auth:mcp",
+    "verify:api": "tsx src/cli/index.ts verify:api",
+    "verify:mcp": "tsx src/cli/index.ts verify:mcp",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
