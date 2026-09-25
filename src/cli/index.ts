@@ -57,7 +57,7 @@ async function doctor(): Promise<void> {
     { name: "Marketing API access token", ok: !!marketingApiToken(), detail: "", needed: "TIKTOK_ACCESS_TOKEN or `npm run auth:api`" },
     { name: "Writes locked (dry run)", ok: !writesEnabled(), detail: writesEnabled() ? "WRITES ENABLED" : "dry run", needed: "Unset TT_WRITES_ENABLED until Phase 7" },
     { name: "Saved settings", ok: true, detail: `${SETTINGS_PATH}: ${settings.advertisers.length} advertisers, ${settings.postingAccounts.length} posting accounts, ${settings.displayCards.length} display cards`, needed: "" },
-    { name: "ffprobe (Phase 4 video checks)", ok: hasBinary("ffprobe"), detail: "", needed: "Install ffmpeg (needed from Phase 4)" },
+    { name: "yt-dlp (link downloads)", ok: hasBinary("yt-dlp", ["--version"]), detail: "", needed: "pip install yt-dlp" },
   ];
   for (const c of checks) {
     console.log(`${c.ok ? "✔" : "✘"} ${c.name}${c.detail ? ` — ${c.detail}` : ""}${c.ok || !c.needed ? "" : `\n    → ${c.needed}`}`);
@@ -158,10 +158,11 @@ async function plan(): Promise<void> {
   const reqPath = arg("request");
   if (!reqPath) throw new Error("Usage: plan --request <file.json> [--facts <live.json>]");
   // Request file: CampaignRequest plus optional
-  //   "videos": [{ "file": "...", "url": "https://www.tiktok.com/...", "rightsConfirmed": true }]
+  //   "videos": [{ "url": "https://www.tiktok.com/...", "rightsConfirmed": true, "caption"?: "...", "file"?: "..." }]
+  //   (no "file" → downloaded from the link; no "caption" → the link's own caption)
   //   "productImage": "path.png"  (default: the landing page's product image)
   const raw = JSON.parse(readFileSync(reqPath, "utf8")) as CampaignRequest & {
-    videos?: { file: string; url?: string; caption?: string; rightsConfirmed?: boolean }[];
+    videos?: { file?: string; url?: string; caption?: string; rightsConfirmed?: boolean }[];
     productImage?: string;
   };
   const settings = loadSettings();

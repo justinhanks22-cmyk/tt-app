@@ -17,7 +17,7 @@ is approved. Only videos you own or are licensed to use are processed.
 | 1. Connect MCP + read Ads account | ✅ verified via the official TikTok MCP connector |
 | 2. Pull advertisers, pixels, campaigns, display cards | ✅ see `docs/account-audit.md` |
 | 3. Campaign creation (dry run) | ✅ `npm run plan -- --request examples/poncho-request.json` |
-| 4. Spark creative handling + display-card generation | ✅ built (dry run); needs account linking + upload token to go live |
+| 4. Spark creative handling + display-card generation | ✅ built (dry run); needs the upload token to go live |
 | 5. Simple interface | — |
 | 6. Full dry-run test | — |
 | 7. Real publishing (after approval) | — |
@@ -64,23 +64,27 @@ until Phase 7.
 
 ## Creatives (Phase 4)
 
-- **Linked account (Spark Ads Push):** once @miaclairee_3 is linked to the ad
-  account as a TikTok account, each video is uploaded and pushed through it with
-  its original caption as the ad text and `dark_post_status: OFF`, so it also
-  shows on the profile. No per-video Spark codes are needed.
-- **Existing posts (Spark Ads Pull):** `tiktokItemIds` of posts already
-  authorized to the ad account. `authorizeSparkAd()` applies a creator's code.
-- **Videos:** `ingestCreative()` takes the original file plus the TikTok link.
-  The caption comes from TikTok's official oEmbed. Every video must be marked
-  `rightsConfirmed`. Automatic download from a link is **not** implemented:
-  TikTok blocks non-browser requests, and getting past that means evading its
-  bot protection.
-- **Display cards:** generated from the product photo (the landing page's
-  og:image by default) and the entered price at TikTok's 750×421, uploaded,
-  and registered as a Display Card, so the price can't be wrong. See
-  `examples/display-card-poncho-29.png`.
+Flow per link: download → post through the linked TikTok account as a Spark
+ad (Spark Ads Push) with the original caption → attach the price card.
+
+- **Posting account:** @oliviaaagan, already linked to the ad account
+  (`TT_USER`, can push videos, not ads-only). Uploaded videos also show on
+  its profile (`dark_post_status: OFF`). No Spark codes are needed.
+- **Download:** `downloadTikTok()` uses yt-dlp with ordinary requests and
+  accepts only a non-watermarked format. It never impersonates a browser: it
+  refuses to run if `curl_cffi` is installed. If TikTok blocks the request
+  (as it does from cloud servers), it stops and asks for the original file.
+  Every link must be marked `rightsConfirmed`.
+- **Caption:** taken from the link via TikTok's official oEmbed, or set with
+  `"caption"` per video.
+- **Existing posts (Spark Ads Pull):** still supported via `tiktokItemIds`
+  (e.g. @miaclairee_3 posts), and `authorizeSparkAd()` applies Spark codes.
+- **Display cards:** generated from the product photo (landing page og:image)
+  and the entered price at 750×421. See `examples/display-card-poncho-29.png`.
 - **Uploads** need the Marketing API token (`npm run auth:api`). The MCP
   server can't send file bytes.
+
+Example: `npm run plan -- --request examples/link-request.json`
 
 ## Files
 

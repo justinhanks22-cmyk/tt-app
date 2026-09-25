@@ -1,31 +1,85 @@
 {
   "_comment": "Read-only snapshot from the TikTok MCP connector, 2026-09-25 (secrets and URLs stripped).",
-  "advertiser": { "advertiser_id": "7360920068810702864", "name": "Relakia0423", "status": "STATUS_ENABLE" },
+  "advertiser": {
+    "advertiser_id": "7360920068810702864",
+    "name": "Relakia0423",
+    "status": "STATUS_ENABLE"
+  },
   "pixel": {
     "pixel_id": "7689247033055625234",
     "pixel_name": "TikTok Pixel for Shopify 1790294391",
     "events": [
-      { "event_type": "ON_WEB_DETAIL", "optimization_event": "ON_WEB_DETAIL" },
-      { "event_type": "ON_WEB_CART", "optimization_event": "ON_WEB_CART" },
-      { "event_type": "SHOPPING", "optimization_event": "SHOPPING" }
+      {
+        "event_type": "ON_WEB_DETAIL",
+        "optimization_event": "ON_WEB_DETAIL"
+      },
+      {
+        "event_type": "ON_WEB_CART",
+        "optimization_event": "ON_WEB_CART"
+      },
+      {
+        "event_type": "SHOPPING",
+        "optimization_event": "SHOPPING"
+      }
     ]
   },
-  "displayCard": { "creative_portfolio_id": "7689257131040721928", "creative_portfolio_type": "CARD" },
+  "displayCard": {
+    "creative_portfolio_id": "7689257131040721928",
+    "creative_portfolio_type": "CARD"
+  },
   "sparkPosts": {
     "7689255287013903629": {
-      "item_info": { "item_id": "7689255287013903629", "text": "the absolute cutest top and it’s only $29 today 💫" },
-      "auth_info": { "ad_auth_status": "AUTHORIZED", "auth_end_time": "2027-09-25 00:03:48" },
-      "user_info": { "identity_id": "7682104290172797966", "identity_type": "AUTH_CODE", "tiktok_name": "miaclairee_" }
+      "item_info": {
+        "item_id": "7689255287013903629",
+        "text": "the absolute cutest top and it’s only $29 today 💫"
+      },
+      "auth_info": {
+        "ad_auth_status": "AUTHORIZED",
+        "auth_end_time": "2027-09-25 00:03:48"
+      },
+      "user_info": {
+        "identity_id": "7682104290172797966",
+        "identity_type": "AUTH_CODE",
+        "tiktok_name": "miaclairee_"
+      }
     },
     "7688472524039949598": {
-      "item_info": { "item_id": "7688472524039949598", "text": "never bought something so fast! Just $34 today 💫" },
-      "auth_info": { "ad_auth_status": "AUTHORIZED", "auth_end_time": "2027-09-22 21:24:54" },
-      "user_info": { "identity_id": "7682104290172797966", "identity_type": "AUTH_CODE", "tiktok_name": "miaclairee_" }
+      "item_info": {
+        "item_id": "7688472524039949598",
+        "text": "never bought something so fast! Just $34 today 💫"
+      },
+      "auth_info": {
+        "ad_auth_status": "AUTHORIZED",
+        "auth_end_time": "2027-09-22 21:24:54"
+      },
+      "user_info": {
+        "identity_id": "7682104290172797966",
+        "identity_type": "AUTH_CODE",
+        "tiktok_name": "miaclairee_"
+      }
     },
     "7686943642308660511": {
-      "item_info": { "item_id": "7686943642308660511", "text": "Sale ends at midnight 💫" },
-      "auth_info": { "ad_auth_status": "AUTHORIZED", "auth_end_time": "2027-09-18 18:35:38" },
-      "user_info": { "identity_id": "7639824351144330253", "identity_type": "AUTH_CODE", "tiktok_name": "Jesse" }
+      "item_info": {
+        "item_id": "7686943642308660511",
+        "text": "Sale ends at midnight 💫"
+      },
+      "auth_info": {
+        "ad_auth_status": "AUTHORIZED",
+        "auth_end_time": "2027-09-18 18:35:38"
+      },
+      "user_info": {
+        "identity_id": "7639824351144330253",
+        "identity_type": "AUTH_CODE",
+        "tiktok_name": "Jesse"
+      }
     }
+  },
+  "pushIdentity": {
+    "identity_id": "0d4532ee-ba4d-5bda-8da5-4fe2b5f4b877",
+    "identity_type": "TT_USER",
+    "display_name": "jordannn",
+    "username": "oliviaaagan",
+    "available_status": "AVAILABLE",
+    "can_push_video": true
   }
 }

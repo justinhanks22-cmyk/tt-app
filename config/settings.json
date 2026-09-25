@@ -9,6 +9,12 @@
   ],
   "postingAccounts": [
     {
+      "label": "oliviaaagan",
+      "handle": "@oliviaaagan",
+      "identityType": "TT_USER",
+      "identityId": "0d4532ee-ba4d-5bda-8da5-4fe2b5f4b877"
+    },
+    {
       "label": "miaclairee_3",
       "handle": "@miaclairee_3",
       "identityType": "AUTH_CODE",
