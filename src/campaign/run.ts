@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import { createDisplayCard } from "../creative/displayCard.js";
 import { log } from "../log/logger.js";
 import { isDryRun, type Gateway } from "../tiktok/gateway.js";
@@ -36,27 +36,44 @@ export async function getSparkIdentity(gw: Gateway, advertiserId: string, userna
 
 // ---- Asset uploads (Spark Ads Push) ----
 
+/**
+ * How files reach TikTok: as bytes over the REST API (default), or, when the
+ * app is hosted, as a signed public link that TikTok fetches (works over MCP,
+ * no developer app needed).
+ */
+export interface BuildOptions {
+  publicUrl?: (localPath: string) => string;
+}
+
+/** TikTok rejects duplicate file names per ad account, so names carry a timestamp. */
+const uniqueName = (base: string, ext: string) => `${base.replace(/[^\w-]+/g, "-").slice(0, 60)}-${Date.now()}${ext}`;
+
+export async function uploadImage(gw: Gateway, advertiserId: string, path: string, name: string, opts: BuildOptions = {}) {
+  const file_name = uniqueName(name, extname(path) || ".png");
+  const r = opts.publicUrl
+    ? await gw.call<{ image_id: string }>("imageUploadByUrl", { advertiser_id: advertiserId, upload_type: "UPLOAD_BY_URL", image_url: opts.publicUrl(path), file_name })
+    : await gw.call<{ image_id: string }>("imageUpload", { advertiser_id: advertiserId, upload_type: "UPLOAD_BY_FILE", file_name, image_file: readFileSync(path) });
+  return isDryRun(r) ? r.fakeId : r.image_id;
+}
+
 /** postTikTok(): uploads each video + cover so it can be pushed through the linked account. */
-export async function uploadCreatives(gw: Gateway, plan: CampaignPlan): Promise<UploadedAssets> {
+export async function uploadCreatives(gw: Gateway, plan: CampaignPlan, opts: BuildOptions = {}): Promise<UploadedAssets> {
   const assets: UploadedAssets = {};
   for (const c of plan.creatives) {
     if (c.kind !== "upload") continue;
     const v = c.video;
-    const video = await gw.call<{ video_id: string }[] | { video_id: string }>("videoUpload", {
-      advertiser_id: plan.request.advertiserId,
-      upload_type: "UPLOAD_BY_FILE",
-      file_name: `${plan.request.productName.slice(0, 40)}-${v.sha256.slice(0, 12)}.mp4`,
-      video_file: readFileSync(v.filePath),
-    });
-    const cover = await gw.call<{ image_id: string }>("imageUpload", {
-      advertiser_id: plan.request.advertiserId,
-      upload_type: "UPLOAD_BY_FILE",
-      file_name: `${basename(v.coverPath, ".jpg")}-cover.jpg`,
-      image_file: readFileSync(v.coverPath),
-    });
+    const name = `${plan.request.productName.slice(0, 40)}-${v.sha256.slice(0, 12)}`;
+    const video = opts.publicUrl
+      ? await gw.call<{ video_id: string }[] | { video_id: string }>("videoUploadByUrl", {
+          advertiser_id: plan.request.advertiserId, upload_type: "UPLOAD_BY_URL", video_url: opts.publicUrl(v.filePath), file_name: uniqueName(name, ".mp4"),
+        })
+      : await gw.call<{ video_id: string }[] | { video_id: string }>("videoUpload", {
+          advertiser_id: plan.request.advertiserId, upload_type: "UPLOAD_BY_FILE", file_name: uniqueName(name, ".mp4"), video_file: readFileSync(v.filePath),
+        });
+    const coverId = await uploadImage(gw, plan.request.advertiserId, v.coverPath, `${name}-cover`, opts);
     assets[v.sha256] = {
       videoId: isDryRun(video) ? video.fakeId : (Array.isArray(video) ? video[0]!.video_id : video.video_id),
-      coverImageId: isDryRun(cover) ? cover.fakeId : cover.image_id,
+      coverImageId: coverId,
     };
   }
   return assets;
@@ -94,7 +111,7 @@ export interface BuildResult {
  * Display card → uploads → campaign → ad group → ads, with the launch status. Refuses
  * to start if any validation check failed. In dry run nothing leaves the machine.
  */
-export async function buildCampaign(gw: Gateway, plan: CampaignPlan, checks: Check[]): Promise<BuildResult> {
+export async function buildCampaign(gw: Gateway, plan: CampaignPlan, checks: Check[], opts: BuildOptions = {}): Promise<BuildResult> {
   if (!canPublish(checks)) {
     const failed = checks.filter((c) => c.status === "fail").map((c) => `#${c.id} ${c.label}: ${c.detail}`);
     throw new Error(`Validation failed — nothing was created:\n${failed.join("\n")}`);
@@ -104,11 +121,10 @@ export async function buildCampaign(gw: Gateway, plan: CampaignPlan, checks: Che
         advertiserId: plan.request.advertiserId,
         product: plan.request.productName,
         price: plan.request.price,
-        png: readFileSync(plan.displayCard.generate.pngPath),
-        fileName: basename(plan.displayCard.generate.pngPath),
+        imageId: await uploadImage(gw, plan.request.advertiserId, plan.displayCard.generate.pngPath, basename(plan.displayCard.generate.pngPath, ".png"), opts),
       })).cardId
     : plan.displayCard.cardId!;
-  const uploaded = await uploadCreatives(gw, plan);
+  const uploaded = await uploadCreatives(gw, plan, opts);
   const campaignId = await createCampaign(gw, plan);
   let adGroupId: string;
   let adIds: string[];
@@ -133,8 +149,8 @@ export async function buildCampaign(gw: Gateway, plan: CampaignPlan, checks: Che
  * (ENABLE = live immediately). Real requests are only sent once writes are
  * enabled (Phase 7); until then it's a dry run.
  */
-export async function publishCampaign(gw: Gateway, plan: CampaignPlan, checks: Check[]): Promise<BuildResult> {
-  return buildCampaign(gw, plan, checks);
+export async function publishCampaign(gw: Gateway, plan: CampaignPlan, checks: Check[], opts: BuildOptions = {}): Promise<BuildResult> {
+  return buildCampaign(gw, plan, checks, opts);
 }
 
 export async function getCampaignStatus(gw: Gateway, advertiserId: string, campaignId: string) {

@@ -26,7 +26,19 @@ interface StoredMcpAuth {
 }
 
 class FileOAuthProvider implements OAuthClientProvider {
-  constructor(private readonly port: number) {}
+  /** Set when TikTok asks the user to approve access. */
+  authorizationUrl?: URL;
+
+  constructor(
+    readonly redirectUrl: string,
+    private readonly onRedirect: (url: URL) => void = (url) =>
+      console.log(`\nOpen this URL in your browser and approve access to your TikTok for Business account:\n\n  ${url}\n`),
+    private readonly stateFn?: () => string,
+  ) {
+    // Only add `state` to the authorization URL when the caller can verify it.
+    if (stateFn) this.state = () => stateFn();
+  }
+  state?: () => string;
 
   private load(): StoredMcpAuth {
     return readSecret<StoredMcpAuth>("mcp-oauth") ?? {};
@@ -35,20 +47,19 @@ class FileOAuthProvider implements OAuthClientProvider {
     writeSecret("mcp-oauth", { ...this.load(), ...patch });
   }
 
-  get redirectUrl(): string {
-    return `http://127.0.0.1:${this.port}/callback`;
-  }
   get clientMetadata(): OAuthClientMetadata {
     return {
-      client_name: "tt-app (local)",
+      client_name: "tt-app",
       redirect_uris: [this.redirectUrl],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     };
   }
+  /** The registered client, only if it was registered for this redirect URL (local vs cloud). */
   clientInformation() {
-    return this.load().client;
+    const client = this.load().client as (OAuthClientInformationMixed & { redirect_uris?: string[] }) | undefined;
+    return client?.redirect_uris && !client.redirect_uris.includes(this.redirectUrl) ? undefined : client;
   }
   saveClientInformation(client: OAuthClientInformationMixed) {
     this.save({ client });
@@ -61,7 +72,8 @@ class FileOAuthProvider implements OAuthClientProvider {
     log("info", "mcp.oauth.tokens_saved", { expires_in: tokens.expires_in });
   }
   redirectToAuthorization(url: URL) {
-    console.log(`\nOpen this URL in your browser and approve access to your TikTok for Business account:\n\n  ${url}\n`);
+    this.authorizationUrl = url;
+    this.onRedirect(url);
   }
   saveCodeVerifier(codeVerifier: string) {
     this.save({ codeVerifier });
@@ -99,25 +111,55 @@ function waitForCallback(port: number): Promise<string> {
   });
 }
 
-export async function connectMcp(opts: { url?: string; port?: number; interactive?: boolean } = {}): Promise<Client> {
-  const url = new URL(opts.url ?? process.env.TIKTOK_MCP_URL ?? DEFAULT_MCP_URL);
-  const port = opts.port ?? Number(process.env.TIKTOK_MCP_OAUTH_PORT ?? 8765);
-  const authProvider = new FileOAuthProvider(port);
+/** Where TikTok sends the browser back: the hosted app when PUBLIC_URL is set, else a local port. */
+export function oauthRedirectUrl(): string {
+  const publicUrl = process.env.PUBLIC_URL?.replace(/\/$/, "");
+  return publicUrl ? `${publicUrl}/oauth/callback` : `http://127.0.0.1:${Number(process.env.TIKTOK_MCP_OAUTH_PORT ?? 8765)}/callback`;
+}
+
+const mcpUrl = (url?: string) => new URL(url ?? process.env.TIKTOK_MCP_URL ?? DEFAULT_MCP_URL);
+
+export async function connectMcp(opts: { url?: string; interactive?: boolean } = {}): Promise<Client> {
+  const url = mcpUrl(opts.url);
+  const authProvider = new FileOAuthProvider(oauthRedirectUrl());
   const client = new Client({ name: "tt-app", version: "0.1.0" });
 
-  const attempt = () => client.connect(new StreamableHTTPClientTransport(url, { authProvider }));
   try {
-    await attempt();
+    await client.connect(new StreamableHTTPClientTransport(url, { authProvider }));
   } catch (err) {
     if (!(err instanceof UnauthorizedError) || !opts.interactive) throw err;
-    // The SDK has printed the authorization URL via redirectToAuthorization.
-    const transport = new StreamableHTTPClientTransport(url, { authProvider });
+    // Terminal flow: the SDK has printed the authorization URL; wait for the local callback.
+    const port = Number(new URL(authProvider.redirectUrl).port);
     const code = await waitForCallback(port);
-    await transport.finishAuth(code);
+    await new StreamableHTTPClientTransport(url, { authProvider }).finishAuth(code);
     await client.connect(new StreamableHTTPClientTransport(url, { authProvider }));
   }
   log("info", "mcp.connected", { url: url.toString(), server: client.getServerVersion() });
   return client;
+}
+
+/**
+ * Web flow, step 1: returns the TikTok approval URL to send the browser to,
+ * or undefined if the saved authorization still works.
+ */
+export async function beginWebAuth(state: () => string, url?: string): Promise<URL | undefined> {
+  const authProvider = new FileOAuthProvider(oauthRedirectUrl(), () => {}, state);
+  const client = new Client({ name: "tt-app", version: "0.1.0" });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(mcpUrl(url), { authProvider }));
+    await client.close();
+    return undefined;
+  } catch (err) {
+    if (err instanceof UnauthorizedError && authProvider.authorizationUrl) return authProvider.authorizationUrl;
+    throw err;
+  }
+}
+
+/** Web flow, step 2: exchanges the code TikTok returned for tokens. */
+export async function finishWebAuth(code: string, url?: string): Promise<void> {
+  const authProvider = new FileOAuthProvider(oauthRedirectUrl(), () => {});
+  await new StreamableHTTPClientTransport(mcpUrl(url), { authProvider }).finishAuth(code);
+  log("info", "mcp.oauth.web_connected", {});
 }
 
 /**

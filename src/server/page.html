@@ -76,8 +76,17 @@
 <main>
   <header>
     <h1>Spark Test Launcher</h1>
-    <span id="mode" class="badge">…</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="mode" class="badge">…</span>
+      <form id="logout" method="post" action="/logout" hidden><button class="secondary" style="padding:5px 10px;font-size:12px">Sign out</button></form>
+    </div>
   </header>
+
+  <div id="connect" class="panel" hidden>
+    <strong>Connect your TikTok for Business account</strong>
+    <p class="sub" style="margin:6px 0 12px">One-time approval so the app can read your ad account and create campaigns. It lasts 30 days.</p>
+    <a href="/connect-tiktok"><button type="button">Connect TikTok</button></a>
+  </div>
 
   <form id="form" class="panel" autocomplete="off">
     <label for="product">Product Name</label>
@@ -173,8 +182,9 @@ function msg(target, kind, text) {
   target.className = `msg ${kind}`;
   target.textContent = text;
 }
-async function api(path, init) {
-  const res = await fetch(path, init);
+async function api(path, init = {}) {
+  const res = await fetch(path, { ...init, headers: { ...(init.headers || {}), "X-TT-App": "1" } });
+  if (res.status === 401) location.href = "/login";
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { data });
   return data;
@@ -189,6 +199,7 @@ async function loadPixels() {
       ...pixels.map((p) => el("option", { value: p.id, textContent: `${p.name} · ${p.code ?? p.id}${p.addToCart ? "" : "  (no Add to Cart event)"}` })));
     $("pixel-hint").textContent = "— newest first";
   } catch (e) {
+    if (/Not connected/.test(e.message)) $("connect").hidden = false;
     sel.replaceChildren(el("option", { value: "", textContent: "Couldn't load pixels — paste an ID below" }));
     $("pixel-hint").textContent = `— ${e.message}`;
   }
@@ -204,6 +215,8 @@ async function init() {
   $("budget").value = options.defaults.dailyBudget;
   $("adtext").value = options.defaults.adText;
   $("publish").classList.toggle("dry", options.mode !== "LIVE");
+  $("connect").hidden = options.tiktokConnected;
+  $("logout").hidden = !options.hosted;
   $("advertiser").addEventListener("change", loadPixels);
   await loadPixels();
 }

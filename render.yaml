@@ -1,0 +1,18 @@
+# Render Blueprint: one Docker web service with a persistent disk for /data.
+services:
+  - type: web
+    name: spark-test-launcher
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: APP_PASSWORD
+        sync: false   # you enter it in the dashboard; never commit it
+      - key: PUBLIC_URL
+        sync: false   # e.g. https://spark-test-launcher.onrender.com
+      - key: SESSION_SECRET
+        generateValue: true

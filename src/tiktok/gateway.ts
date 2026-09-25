@@ -34,6 +34,9 @@ export const OPERATIONS = {
   // File uploads send bytes, which only the REST route supports.
   videoUpload: { mcp: null, path: "/file/video/ad/upload/", write: true, file: ["video_file", "video_signature"] },
   imageUpload: { mcp: null, path: "/file/image/ad/upload/", write: true, file: ["image_file", "image_signature"] },
+  // The same uploads by public URL (the hosted app serves signed links), which MCP supports.
+  videoUploadByUrl: { mcp: "file_video_ad_upload", path: "/file/video/ad/upload/", write: true },
+  imageUploadByUrl: { mcp: "file_image_ad_upload", path: "/file/image/ad/upload/", write: true },
   portfolioCreate: { mcp: "creative_portfolio_create", path: "/creative/portfolio/create/", write: true },
   smartPlusCampaignStatusUpdate: { mcp: "smart_plus_campaign_status_update", path: "/smart_plus/campaign/status/update/", write: true },
 } as const satisfies Record<string, OperationSpec>;

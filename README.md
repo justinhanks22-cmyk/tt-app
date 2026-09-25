@@ -82,8 +82,9 @@ ad (Spark Ads Push) with the original caption → attach the price card.
   (e.g. @miaclairee_3 posts), and `authorizeSparkAd()` applies Spark codes.
 - **Display cards:** generated from the product photo (landing page og:image)
   and the entered price at 750×421. See `examples/display-card-poncho-29.png`.
-- **Uploads** need the Marketing API token (`npm run auth:api`). The MCP
-  server can't send file bytes.
+- **Uploads:** on your computer they use the Marketing API token (`npm run auth:api`),
+  because the MCP server can't send file bytes. When hosted, TikTok fetches each
+  file from a signed 1-hour link over MCP instead, so no token is needed.
 
 Example: `npm run plan -- --request examples/link-request.json`
 
@@ -106,6 +107,10 @@ expires after 30 minutes. The badge shows DRY RUN until Phase 7 enables
 real publishing.
 
 Screenshots: `docs/screenshots/`.
+
+**Hosted in the cloud:** see [`docs/deploy.md`](docs/deploy.md). A Dockerfile
+and a Render blueprint are included. The hosted app has a password login, a
+Connect TikTok button, and uploads through signed links (no developer app).
 
 ## Files
 

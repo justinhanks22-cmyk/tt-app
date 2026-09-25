@@ -1,23 +1,30 @@
 import { randomUUID } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { prepareCampaign, PrepareError, type Prepared, type PrepareInput } from "../campaign/prepare.js";
 import { buildCampaign } from "../campaign/run.js";
 import { fetchLiveFacts, type LiveFacts } from "../campaign/validate.js";
 import type { CampaignPlan } from "../campaign/plan.js";
 import { marketingApiToken } from "../config/secrets.js";
-import { loadSettings, saveSettings } from "../config/store.js";
+import { readSecret } from "../config/secrets.js";
+import { loadSettings, saveSettings, SETTINGS_PATH } from "../config/store.js";
 import { rememberDisplayCard } from "../creative/displayCard.js";
 import { log } from "../log/logger.js";
 import { McpGateway, RecordingGateway, RestGateway, type Gateway } from "../tiktok/gateway.js";
 import { MarketingApiClient, writesEnabled } from "../tiktok/marketingApi.js";
-import { connectMcp } from "../tiktok/mcpClient.js";
+import { beginWebAuth, connectMcp, finishWebAuth } from "../tiktok/mcpClient.js";
+import {
+  cookieValue, mediaSignatureValid, newOAuthState, newSession, oauthStateValid, passwordMatches,
+  SESSION_COOKIE, sessionValid, signMediaPath,
+} from "./auth.js";
 
 /**
- * The local interface: form → Prepare → review → PUBLISH.
- *   npm run app                         (live reads via the MCP server)
+ * The interface: form → Prepare → review → PUBLISH.
+ *   npm run app                         (on your computer: http://localhost:5177)
  *   npm run app -- --demo <facts.json>  (no TikTok connection; snapshot facts)
+ * Hosted (HOST=0.0.0.0): requires APP_PASSWORD and PUBLIC_URL; TikTok is
+ * connected from the page, and uploads use signed links TikTok fetches.
  * Publishing sends real requests only when TT_WRITES_ENABLED is set (Phase 7).
  */
 try {
@@ -27,6 +34,29 @@ try {
 }
 
 const PORT = Number(process.env.PORT ?? 5177);
+const HOST = process.env.HOST ?? "127.0.0.1";
+const HOSTED = !["127.0.0.1", "localhost", "::1"].includes(HOST);
+const PUBLIC_URL = process.env.PUBLIC_URL?.replace(/\/$/, "");
+const LOGIN_REQUIRED = HOSTED || !!process.env.APP_PASSWORD;
+
+if (HOSTED) {
+  // The app can spend money: never expose it without a login and a known address.
+  const problems = [
+    (process.env.APP_PASSWORD ?? "").length < 12 && "APP_PASSWORD (12+ characters)",
+    !PUBLIC_URL?.startsWith("https://") && "PUBLIC_URL (the app's https:// address)",
+  ].filter(Boolean);
+  if (problems.length) {
+    console.error(`Refusing to listen on ${HOST}: set ${problems.join(" and ")}.`);
+    process.exit(1);
+  }
+}
+
+// First start on a fresh data volume: seed the saved setup shipped with the app.
+const BUNDLED_SETTINGS = resolve(import.meta.dirname, "../../config/settings.json");
+if (!existsSync(SETTINGS_PATH) && existsSync(BUNDLED_SETTINGS) && resolve(SETTINGS_PATH) !== BUNDLED_SETTINGS) {
+  mkdirSync(dirname(SETTINGS_PATH), { recursive: true });
+  copyFileSync(BUNDLED_SETTINGS, SETTINGS_PATH);
+}
 const demoIdx = process.argv.indexOf("--demo");
 const demoFacts: LiveFacts | undefined = demoIdx > 0 ? JSON.parse(readFileSync(process.argv[demoIdx + 1]!, "utf8")) : undefined;
 const PAGE = resolve(import.meta.dirname, "page.html");
@@ -52,6 +82,17 @@ async function liveFacts(plan: CampaignPlan): Promise<LiveFacts> {
 }
 
 const prepared = new Map<string, Prepared & { createdAt: number }>();
+
+/**
+ * Hosted without a Marketing API token: hand TikTok a signed, 1-hour link to
+ * each file instead of uploading bytes. Locally, bytes go over REST.
+ */
+function buildOptions() {
+  if (!PUBLIC_URL || marketingApiToken()) return {};
+  return { publicUrl: (path: string) => `${PUBLIC_URL}${signMediaPath(relative(MEDIA, resolve(path)))}` };
+}
+
+const tiktokConnected = () => !!readSecret<{ tokens?: unknown }>("mcp-oauth")?.tokens;
 
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -86,6 +127,8 @@ const routes: Record<string, Handler> = {
       landingPageDomains: s.landingPageDomains,
       mode: writesEnabled() && !demoFacts ? "LIVE" : "DRY RUN",
       demo: !!demoFacts,
+      tiktokConnected: !!demoFacts || tiktokConnected(),
+      hosted: LOGIN_REQUIRED,
     });
   },
 
@@ -137,7 +180,7 @@ const routes: Record<string, Handler> = {
     if (!p.review.publishable) return send(res, 409, { error: "Safety checks failed — nothing was created." });
     const gw = demoFacts ? new RecordingGateway() : await gateway();
     try {
-      const result = await buildCampaign(gw, p.plan, p.checks);
+      const result = await buildCampaign(gw, p.plan, p.checks, buildOptions());
       prepared.delete(id);
       if (!result.dryRun && p.plan.displayCard.generate) {
         const s = loadSettings();
@@ -151,18 +194,114 @@ const routes: Record<string, Handler> = {
   },
 };
 
-const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg" };
+const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".mp4": "video/mp4" };
+
+function serveMedia(res: ServerResponse, file: string, types: string[]) {
+  if (!file.startsWith(MEDIA + "/") || !existsSync(file) || !types.includes(extname(file))) return send(res, 404, { error: "not found" });
+  res.writeHead(200, { "Content-Type": MIME[extname(file)]!, "Cache-Control": "private, max-age=300" });
+  createReadStream(file).pipe(res);
+}
+
+// ---- Login ----
+
+const failures = new Map<string, { count: number; until: number }>();
+const LOGIN_PAGE = (error = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · Spark Test Launcher</title>
+<style>:root{--bg:#f6f6f4;--panel:#fff;--text:#17171a;--line:#e3e3e0;--bad:#b3261e}@media (prefers-color-scheme:dark){:root{--bg:#121214;--panel:#1b1b1f;--text:#ececef;--line:#2c2c32;--bad:#ff8a80}}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif;padding:16px}
+form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;width:100%;max-width:340px}
+h1{font-size:18px;margin:0 0 16px}input{width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:transparent;color:inherit}
+button{margin-top:12px;width:100%;font:inherit;font-weight:700;padding:12px;border:0;border-radius:10px;background:var(--text);color:var(--bg);cursor:pointer}p{color:var(--bad);font-size:14px;margin:10px 0 0}</style></head>
+<body><form method="post" action="/login"><h1>Spark Test Launcher</h1><input type="password" name="password" placeholder="Password" autofocus required>
+<button>Sign in</button>${error ? `<p>${error}</p>` : ""}</form></body></html>`;
+
+function authed(req: IncomingMessage): boolean {
+  return !LOGIN_REQUIRED || sessionValid(cookieValue(req.headers.cookie, SESSION_COOKIE));
+}
+
+const publicRoutes: Record<string, Handler> = {
+  "GET /healthz": async (_req, res) => send(res, 200, { ok: true }),
+  "GET /login": async (_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(LOGIN_PAGE());
+  },
+  "POST /login": async (req, res) => {
+    const ip = req.socket.remoteAddress ?? "?";
+    const f = failures.get(ip);
+    if (f && f.until > Date.now()) {
+      res.writeHead(429, { "Content-Type": "text/html; charset=utf-8" });
+      return void res.end(LOGIN_PAGE("Too many attempts — wait a minute."));
+    }
+    const password = new URLSearchParams((await body(req, 10_000)).toString()).get("password") ?? "";
+    if (!passwordMatches(password)) {
+      const count = (f?.count ?? 0) + 1;
+      failures.set(ip, { count, until: count >= 5 ? Date.now() + 60_000 : 0 });
+      log("warn", "server.login_failed", { ip });
+      res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
+      return void res.end(LOGIN_PAGE("Wrong password."));
+    }
+    failures.delete(ip);
+    res.writeHead(303, {
+      Location: "/",
+      "Set-Cookie": `${SESSION_COOKIE}=${newSession()}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${HOSTED ? "; Secure" : ""}`,
+    });
+    res.end();
+  },
+};
+
+// ---- Connect TikTok (web OAuth) ----
+
+routes["GET /connect-tiktok"] = async (_req, res) => {
+  const url = await beginWebAuth(newOAuthState);
+  res.writeHead(303, { Location: url ? url.toString() : "/?connected=1" });
+  res.end();
+};
+
+routes["GET /oauth/callback"] = async (_req, res, url) => {
+  if (!oauthStateValid(url.searchParams.get("state"))) return send(res, 400, { error: "Invalid or expired sign-in attempt — press Connect TikTok again." });
+  const code = url.searchParams.get("code");
+  if (!code) return send(res, 400, { error: `TikTok didn't approve access: ${url.searchParams.get("error") ?? "no code"}` });
+  await finishWebAuth(code);
+  gatewayPromise = undefined; // reconnect with the new tokens
+  res.writeHead(303, { Location: "/?connected=1" });
+  res.end();
+};
+
+routes["POST /logout"] = async (_req, res) => {
+  res.writeHead(303, { Location: "/login", "Set-Cookie": `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax` });
+  res.end();
+};
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cache-Control", "no-store");
   try {
-    const route = routes[`${req.method} ${url.pathname}`];
+    const key = `${req.method} ${url.pathname}`;
+    if (publicRoutes[key]) return await publicRoutes[key](req, res, url);
+
+    // Signed links TikTok fetches during upload — no login, but must be valid and unexpired.
+    if (req.method === "GET" && url.pathname.startsWith("/public-media/")) {
+      const rel = decodeURIComponent(url.pathname.slice("/public-media/".length));
+      if (!mediaSignatureValid(rel, url.searchParams.get("exp"), url.searchParams.get("sig"))) return send(res, 403, { error: "expired or invalid link" });
+      return serveMedia(res, resolve(MEDIA, rel), [".mp4", ".jpg", ".png"]);
+    }
+
+    if (!authed(req)) {
+      if (url.pathname.startsWith("/api/")) return send(res, 401, { error: "Signed out — reload the page." });
+      res.writeHead(303, { Location: "/login" });
+      return void res.end();
+    }
+    // Cross-site requests can't set this header, so state-changing calls must come from the page.
+    if (req.method === "POST" && url.pathname.startsWith("/api/") && req.headers["x-tt-app"] !== "1") {
+      return send(res, 403, { error: "Missing app header" });
+    }
+
+    const route = routes[key];
     if (route) return await route(req, res, url);
     if (req.method === "GET" && url.pathname.startsWith("/media/")) {
-      const file = resolve("." + decodeURIComponent(url.pathname));
-      if (!file.startsWith(MEDIA + "/") || !existsSync(file) || !MIME[extname(file)]) return send(res, 404, { error: "not found" });
-      res.writeHead(200, { "Content-Type": MIME[extname(file)]! });
-      return createReadStream(file).pipe(res);
+      return serveMedia(res, resolve("." + decodeURIComponent(url.pathname)), [".png", ".jpg"]);
     }
     send(res, 404, { error: "not found" });
   } catch (err) {
@@ -171,7 +310,8 @@ const server = createServer(async (req, res) => {
   }
 });
 
-// Localhost only: this server can spend money on your ad account.
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`tt-app running at http://localhost:${PORT} — ${demoFacts ? "DEMO (no TikTok connection)" : writesEnabled() ? "LIVE" : "DRY RUN"}`);
+// Defaults to localhost; hosting requires APP_PASSWORD + PUBLIC_URL (checked above).
+server.listen(PORT, HOST, () => {
+  const where = HOSTED ? PUBLIC_URL : `http://localhost:${PORT}`;
+  console.log(`tt-app running at ${where} — ${demoFacts ? "DEMO (no TikTok connection)" : writesEnabled() ? "LIVE" : "DRY RUN"}${LOGIN_REQUIRED ? " · login required" : ""}`);
 });

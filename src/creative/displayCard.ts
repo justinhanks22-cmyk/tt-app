@@ -55,24 +55,17 @@ export async function productImageFromLandingPage(landingPageUrl: string, fetchI
 }
 
 /**
- * Uploads a rendered card and registers it as a Display Card portfolio.
- * In dry run both writes are recorded and a placeholder ID is returned.
+ * Registers an uploaded card image as a Display Card portfolio.
+ * In dry run the write is recorded and a placeholder ID is returned.
  */
 export async function createDisplayCard(
   gw: Gateway,
-  opts: { advertiserId: string; product: string; price: number; png: Buffer; fileName: string },
+  opts: { advertiserId: string; product: string; price: number; imageId: string },
 ): Promise<{ cardId: string; label: string; dryRun: boolean }> {
-  const image = await gw.call<{ image_id: string }>("imageUpload", {
-    advertiser_id: opts.advertiserId,
-    upload_type: "UPLOAD_BY_FILE",
-    file_name: opts.fileName,
-    image_file: opts.png,
-  });
-  const imageId = isDryRun(image) ? image.fakeId : image.image_id;
   const portfolio = await gw.call<{ creative_portfolio_id: string }>("portfolioCreate", {
     advertiser_id: opts.advertiserId,
     creative_portfolio_type: "CARD",
-    portfolio_content: [{ card_type: "IMAGE", image_id: imageId }],
+    portfolio_content: [{ card_type: "IMAGE", image_id: opts.imageId }],
   });
   const dryRun = isDryRun(portfolio);
   const cardId = dryRun ? portfolio.fakeId : portfolio.creative_portfolio_id;
