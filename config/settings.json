@@ -7,8 +7,14 @@
       "timezone": "America/New_York"
     }
   ],
-  "postingAccounts": [],
-  "pixels": [],
+  "postingAccounts": [
+    {
+      "label": "miaclairee_3",
+      "handle": "@miaclairee_3",
+      "identityType": "AUTH_CODE",
+      "identityId": "7682104290172797966"
+    }
+  ],
   "displayCards": [],
   "landingPageDomains": [],
   "defaults": {

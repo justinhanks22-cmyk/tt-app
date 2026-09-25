@@ -22,18 +22,13 @@ export const PostingAccountSchema = z.object({
   identityAuthorizedBcId: z.string().optional(),
 });
 
-export const PixelMappingSchema = z.object({
-  advertiserId: z.string(),
-  pixelId: z.string(),
-  pixelCode: z.string().optional(),
-  name: z.string(),
-  isDefault: z.boolean().default(false),
-});
-
+// Display cards are images (product photo + price text); the API returns no
+// label, so each card's product and price are recorded here when it's added.
 export const DisplayCardSchema = z
   .object({
     advertiserId: z.string(),
-    cardId: z.string(),
+    cardId: z.string(), // creative_portfolio_id, type CARD
+    product: z.string().optional(),
     label: z.string(), // exactly as shown on the card, e.g. "$29 TODAY ONLY"
     price: z.number().positive().optional(), // for "$N TODAY ONLY" cards
     offer: z.string().optional(), // for non-price cards, e.g. "70% OFF"
@@ -61,7 +56,8 @@ export const NamingSchema = z.object({
 export const SettingsSchema = z.object({
   advertisers: z.array(AdvertiserSchema).default([]),
   postingAccounts: z.array(PostingAccountSchema).default([]),
-  pixels: z.array(PixelMappingSchema).default([]),
+  // No saved pixel list: pixels are created/deleted per product, so the pixel
+  // is chosen for each campaign and re-verified live (exists, has Add to Cart).
   displayCards: z.array(DisplayCardSchema).default([]),
   landingPageDomains: z.array(z.string()).default([]),
   defaults: DefaultsSchema.default(DefaultsSchema.parse({})),

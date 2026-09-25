@@ -49,7 +49,7 @@ async function doctor(): Promise<void> {
     { name: "TIKTOK_APP_SECRET", ok: !!process.env.TIKTOK_APP_SECRET, detail: "", needed: "Developer app secret (env only)" },
     { name: "Marketing API access token", ok: !!marketingApiToken(), detail: "", needed: "TIKTOK_ACCESS_TOKEN or `npm run auth:api`" },
     { name: "Writes locked (dry run)", ok: !writesEnabled(), detail: writesEnabled() ? "WRITES ENABLED" : "dry run", needed: "Unset TT_WRITES_ENABLED until Phase 7" },
-    { name: "Saved settings", ok: true, detail: `${SETTINGS_PATH}: ${settings.advertisers.length} advertisers, ${settings.pixels.length} pixels, ${settings.displayCards.length} display cards`, needed: "" },
+    { name: "Saved settings", ok: true, detail: `${SETTINGS_PATH}: ${settings.advertisers.length} advertisers, ${settings.postingAccounts.length} posting accounts, ${settings.displayCards.length} display cards`, needed: "" },
     { name: "ffprobe (Phase 4 video checks)", ok: hasBinary("ffprobe"), detail: "", needed: "Install ffmpeg (needed from Phase 4)" },
   ];
   for (const c of checks) {
