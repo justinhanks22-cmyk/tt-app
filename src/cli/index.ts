@@ -7,12 +7,10 @@ import { log } from "../log/logger.js";
 import { API_BASE, MarketingApiClient, writesEnabled } from "../tiktok/marketingApi.js";
 import { callMcpTool, connectMcp, DEFAULT_MCP_URL } from "../tiktok/mcpClient.js";
 import { readFileSync } from "node:fs";
-import { planCampaign, PlanError, selectDisplayCard, type CampaignRequest } from "../campaign/plan.js";
-import { cardLabel, productImageFromLandingPage, renderDisplayCard } from "../creative/displayCard.js";
-import { ingestCreative } from "../creative/ingest.js";
-import { buildCampaign, reviewSummary } from "../campaign/run.js";
-import { fetchLiveFacts, validateCampaign, type LiveFacts } from "../campaign/validate.js";
-import { McpGateway, type Gateway, type DryRunRecord } from "../tiktok/gateway.js";
+import { prepareCampaign, PrepareError, type Prepared, type PrepareInput, type VideoInput } from "../campaign/prepare.js";
+import { buildCampaign } from "../campaign/run.js";
+import { fetchLiveFacts, type LiveFacts } from "../campaign/validate.js";
+import { McpGateway, RecordingGateway } from "../tiktok/gateway.js";
 
 try {
   process.loadEnvFile(".env");
@@ -154,60 +152,42 @@ function arg(name: string): string | undefined {
  *   plan --request req.json [--facts live.json]
  * Without --facts, live facts are read through the MCP server (read-only).
  */
+/** Live facts: from a snapshot file (--facts) or read-only through the MCP server. */
+async function liveFactsSource(factsPath?: string) {
+  if (factsPath) {
+    const facts = JSON.parse(readFileSync(factsPath, "utf8")) as LiveFacts;
+    return async () => facts;
+  }
+  return async (p: Parameters<typeof fetchLiveFacts>[1]) => {
+    const client = await connectMcp();
+    try {
+      return await fetchLiveFacts(new McpGateway(client), p);
+    } finally {
+      await client.close();
+    }
+  };
+}
+
+/**
+ * plan --request req.json [--facts live.json]
+ * Request file: the form fields plus "videos": [{ "url": "...", "file"?: "..." }]
+ * and "rightsConfirmed": true. Prints the review, then builds in DRY RUN.
+ */
 async function plan(): Promise<void> {
   const reqPath = arg("request");
   if (!reqPath) throw new Error("Usage: plan --request <file.json> [--facts <live.json>]");
-  // Request file: CampaignRequest plus optional
-  //   "videos": [{ "url": "https://www.tiktok.com/...", "rightsConfirmed": true, "caption"?: "...", "file"?: "..." }]
-  //   (no "file" → downloaded from the link; no "caption" → the link's own caption)
-  //   "productImage": "path.png"  (default: the landing page's product image)
-  const raw = JSON.parse(readFileSync(reqPath, "utf8")) as CampaignRequest & {
-    videos?: { file?: string; url?: string; caption?: string; rightsConfirmed?: boolean }[];
-    productImage?: string;
-  };
+  const raw = JSON.parse(readFileSync(reqPath, "utf8")) as Omit<PrepareInput, "videos"> & { videos?: (VideoInput & { rightsConfirmed?: boolean })[] };
+  const input: PrepareInput = { ...raw, rightsConfirmed: raw.rightsConfirmed ?? (raw.videos ?? []).every((v) => v.rightsConfirmed === true) };
   const settings = loadSettings();
-  const uploads = [];
-  for (const v of raw.videos ?? []) {
-    uploads.push(await ingestCreative({ filePath: v.file, url: v.url, caption: v.caption, rightsConfirmed: v.rightsConfirmed === true }));
-  }
-  const request: CampaignRequest = { ...raw, tiktokItemIds: raw.tiktokItemIds ?? [], uploads };
-
-  // Display card: reuse an exact product+price card, otherwise generate one from the price.
-  let generated: { pngPath: string; label: string } | undefined;
+  let prepared: Prepared;
   try {
-    selectDisplayCard(settings, request.advertiserId, request.productName, request.price);
+    prepared = await prepareCampaign(settings, input, await liveFactsSource(arg("facts")));
   } catch (err) {
-    if (!(err instanceof PlanError) || /match/.test(err.message)) throw err;
-    const photo = raw.productImage ? readFileSync(raw.productImage) : await productImageFromLandingPage(request.landingPageUrl);
-    mkdirSync("media/cards", { recursive: true });
-    const pngPath = `media/cards/${request.productName.replace(/[^\w-]+/g, "-").toLowerCase()}-${request.price}.png`;
-    writeFileSync(pngPath, await renderDisplayCard(photo, request.price));
-    generated = { pngPath, label: cardLabel(request.price) };
-    console.log(`Generated display card ${pngPath} (${generated.label})`);
+    if (err instanceof PrepareError) for (const p of err.problems) console.error(`✘ ${p.video}: ${p.error}`);
+    throw err;
   }
-  const campaignPlan = planCampaign(settings, request, new Date(), generated);
+  const { plan: campaignPlan, checks, review } = prepared;
 
-  // Writes are always recorded, never sent, from this command.
-  const recorder: Gateway = {
-    recorded: [] as DryRunRecord[],
-    async call(op, payload) {
-      const r: DryRunRecord = { dryRun: true, operation: op, payload, fakeId: `DRYRUN-${op}-${this.recorded.length + 1}` };
-      this.recorded.push(r);
-      return r;
-    },
-  };
-  let live: LiveFacts;
-  const factsPath = arg("facts");
-  if (factsPath) {
-    live = JSON.parse(readFileSync(factsPath, "utf8")) as LiveFacts;
-  } else {
-    const client = await connectMcp();
-    live = await fetchLiveFacts(new McpGateway(client), campaignPlan);
-    await client.close();
-  }
-
-  const checks = validateCampaign(campaignPlan, settings, live);
-  const review = reviewSummary(campaignPlan, checks);
   const pad = Math.max(...review.rows.map(([k]) => k.length), ...review.toggles.map(([k]) => k.length));
   console.log("\n=== REVIEW ===");
   for (const [k, v] of review.rows) console.log(`${k.padEnd(pad)}  ${v}`);
@@ -222,6 +202,7 @@ async function plan(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const recorder = new RecordingGateway();
   const result = await buildCampaign(recorder, campaignPlan, checks);
   mkdirSync("logs", { recursive: true });
   const out = `logs/dryrun-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;

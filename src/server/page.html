@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spark Test Launcher</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #17171a; --muted: #6b6b73; --line: #e3e3e0;
+    --accent: #111; --accent-text: #fff; --ok: #1f7a4a; --ok-bg: #e5f4ec; --warn: #8a5a00; --warn-bg: #fdf1d9;
+    --bad: #b3261e; --bad-bg: #fbe4e2; --live: #d61f5a; --field: #fafaf9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121214; --panel: #1b1b1f; --text: #ececef; --muted: #9a9aa3; --line: #2c2c32;
+      --accent: #f2f2f2; --accent-text: #111; --ok: #6fd39e; --ok-bg: #16301f; --warn: #f0c060; --warn-bg: #33290f;
+      --bad: #ff8a80; --bad-bg: #3a1714; --live: #ff4d85; --field: #16161a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .badge { font-size: 12px; font-weight: 700; letter-spacing: .06em; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+  .badge.live { background: var(--live); color: #fff; border-color: var(--live); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 6px; }
+  label:first-child { margin-top: 0; }
+  .hint { font-weight: 400; color: var(--muted); }
+  input, select, textarea { width: 100%; font: inherit; color: inherit; background: var(--field); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; }
+  textarea { min-height: 110px; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+  .money { position: relative; }
+  .money span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  .money input { padding-left: 24px; }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-weight: 500; margin-top: 16px; }
+  .check input { width: auto; margin-top: 3px; }
+  button { font: inherit; font-weight: 700; border: 0; border-radius: 10px; padding: 12px 18px; cursor: pointer; background: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .actions { margin-top: 18px; display: flex; gap: 10px; align-items: center; }
+  .publish { width: 100%; font-size: 20px; letter-spacing: .04em; padding: 20px; background: var(--live); color: #fff; margin-top: 8px; }
+  .publish.dry { background: var(--accent); color: var(--accent-text); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--muted); width: 42%; padding-right: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .pill.off { background: var(--ok-bg); color: var(--ok); }
+  .pill.on { background: var(--warn-bg); color: var(--warn); }
+  .pill.other { background: var(--field); color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+  .checks { list-style: none; padding: 0; margin: 0; }
+  .checks li { display: flex; gap: 10px; padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; font-size: 14px; }
+  .checks .icon { font-weight: 800; width: 16px; flex: none; }
+  .checks .pass .icon { color: var(--ok); }
+  .checks .warn { background: var(--warn-bg); } .checks .warn .icon { color: var(--warn); }
+  .checks .fail { background: var(--bad-bg); } .checks .fail .icon { color: var(--bad); }
+  .checks small { display: block; color: var(--muted); }
+  .card-preview { width: 100%; max-width: 375px; border-radius: 10px; border: 1px solid var(--line); display: block; }
+  .msg { padding: 12px 14px; border-radius: 10px; margin-top: 14px; font-size: 14px; }
+  .msg.bad { background: var(--bad-bg); color: var(--bad); }
+  .msg.good { background: var(--ok-bg); color: var(--ok); }
+  .problem { margin-top: 10px; font-size: 14px; }
+  .problem code { word-break: break-all; }
+  .problem input { margin-top: 6px; }
+  .headline { font-size: 18px; font-weight: 700; margin: 0 0 4px; word-break: break-word; }
+  .sub { color: var(--muted); margin: 0 0 14px; font-size: 14px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Spark Test Launcher</h1>
+    <span id="mode" class="badge">…</span>
+  </header>
+
+  <form id="form" class="panel" autocomplete="off">
+    <label for="product">Product Name</label>
+    <input id="product" required placeholder="Crochet Poncho">
+
+    <label for="urls">TikTok URLs <span class="hint">— one per line</span></label>
+    <textarea id="urls" required placeholder="https://www.tiktok.com/@creator/video/…"></textarea>
+
+    <div class="row">
+      <div>
+        <label for="price">Product Price</label>
+        <div class="money"><span>$</span><input id="price" type="number" min="0.01" step="0.01" required placeholder="29"></div>
+      </div>
+      <div>
+        <label for="budget">Daily Budget</label>
+        <div class="money"><span>$</span><input id="budget" type="number" min="1" step="1" required></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="account">TikTok Account</label>
+        <select id="account" required></select>
+      </div>
+      <div>
+        <label for="advertiser">TikTok Ads Account</label>
+        <select id="advertiser" required></select>
+      </div>
+    </div>
+
+    <label for="pixel">Pixel <span class="hint" id="pixel-hint"></span></label>
+    <select id="pixel"></select>
+    <input id="pixel-manual" placeholder="…or paste a pixel ID" style="margin-top:8px">
+
+    <label for="landing">Landing Page</label>
+    <input id="landing" type="url" required placeholder="https://yourstore.com/products/…">
+
+    <div class="row">
+      <div>
+        <label for="event">Optimization Event</label>
+        <input id="event" value="Add to Cart" disabled>
+      </div>
+      <div>
+        <label for="adtext">Ad Copy</label>
+        <input id="adtext" required maxlength="100">
+      </div>
+    </div>
+
+    <label class="check"><input id="rights" type="checkbox" required> I own these videos or have the creators' permission to use them.</label>
+
+    <div class="actions">
+      <button id="prepare" type="submit">Prepare Campaign</button>
+      <span id="status" class="hint"></span>
+    </div>
+    <div id="form-msg" hidden></div>
+    <div id="problems" hidden></div>
+  </form>
+
+  <section id="review" hidden>
+    <div class="panel">
+      <p class="headline" id="r-name"></p>
+      <p class="sub" id="r-sub"></p>
+      <table id="r-rows"></table>
+    </div>
+    <div class="panel" id="r-card-panel" hidden>
+      <h2>Display card</h2>
+      <img id="r-card" class="card-preview" alt="Display card preview">
+    </div>
+    <div class="panel">
+      <h2>Optional TikTok features</h2>
+      <table id="r-toggles"></table>
+    </div>
+    <div class="panel">
+      <h2>Safety checks</h2>
+      <ul class="checks" id="r-checks"></ul>
+      <button id="publish" class="publish" type="button">PUBLISH CAMPAIGN</button>
+      <div id="publish-msg" hidden></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let options, preparedId, fallbackFiles = {};
+
+function el(tag, props = {}, ...children) {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...children);
+  return n;
+}
+function msg(target, kind, text) {
+  target.hidden = false;
+  target.className = `msg ${kind}`;
+  target.textContent = text;
+}
+async function api(path, init) {
+  const res = await fetch(path, init);
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { data });
+  return data;
+}
+
+async function loadPixels() {
+  const sel = $("pixel");
+  sel.replaceChildren(el("option", { value: "", textContent: "Loading pixels…" }));
+  try {
+    const pixels = await api(`/api/pixels?advertiserId=${encodeURIComponent($("advertiser").value)}`);
+    sel.replaceChildren(el("option", { value: "", textContent: pixels.length ? "Choose a pixel" : "No pixels found — paste an ID below" }),
+      ...pixels.map((p) => el("option", { value: p.id, textContent: `${p.name} · ${p.code ?? p.id}${p.addToCart ? "" : "  (no Add to Cart event)"}` })));
+    $("pixel-hint").textContent = "— newest first";
+  } catch (e) {
+    sel.replaceChildren(el("option", { value: "", textContent: "Couldn't load pixels — paste an ID below" }));
+    $("pixel-hint").textContent = `— ${e.message}`;
+  }
+}
+
+async function init() {
+  options = await api("/api/options");
+  const mode = $("mode");
+  mode.textContent = options.demo ? "DEMO · DRY RUN" : options.mode;
+  mode.classList.toggle("live", options.mode === "LIVE");
+  $("account").replaceChildren(...options.postingAccounts.map((a) => el("option", { value: a.label, textContent: a.handle })));
+  $("advertiser").replaceChildren(...options.advertisers.map((a) => el("option", { value: a.advertiserId, textContent: `${a.name} · ${a.advertiserId}` })));
+  $("budget").value = options.defaults.dailyBudget;
+  $("adtext").value = options.defaults.adText;
+  $("publish").classList.toggle("dry", options.mode !== "LIVE");
+  $("advertiser").addEventListener("change", loadPixels);
+  await loadPixels();
+}
+
+function formInput() {
+  const urls = $("urls").value.split(/\s+/).map((u) => u.trim()).filter(Boolean);
+  return {
+    advertiserId: $("advertiser").value,
+    productName: $("product").value.trim(),
+    price: Number($("price").value),
+    pixelId: $("pixel-manual").value.trim() || $("pixel").value,
+    landingPageUrl: $("landing").value.trim(),
+    postingAccount: $("account").value,
+    dailyBudget: Number($("budget").value),
+    adText: $("adtext").value.trim(),
+    rightsConfirmed: $("rights").checked,
+    videos: urls.map((url) => ({ url, file: fallbackFiles[url] })),
+  };
+}
+
+function showProblems(problems) {
+  const box = $("problems");
+  box.hidden = false;
+  box.replaceChildren(...problems.map((p) => {
+    const input = el("input", { type: "file", accept: "video/*" });
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      if (!file) return;
+      $("status").textContent = "Uploading video…";
+      const { file: path } = await api("/api/upload", { method: "POST", body: file });
+      fallbackFiles[p.video] = path;
+      $("status").textContent = "Video attached — press Prepare Campaign again.";
+    });
+    return el("div", { className: "problem msg bad" },
+      el("div", {}, el("code", { textContent: p.video })),
+      el("div", { textContent: p.error }),
+      el("div", { textContent: "Attach the original video file for this link:" }), input);
+  }));
+}
+
+function renderReview(review, cardUrl) {
+  const rows = Object.fromEntries(review.rows);
+  $("r-name").textContent = rows["Campaign name"];
+  $("r-sub").textContent = `${rows["Creatives"]} · ${rows["Launch"]}`;
+  $("r-rows").replaceChildren(...review.rows.filter(([k]) => k !== "Campaign name").map(([k, v]) => el("tr", {}, el("td", { textContent: k }), el("td", { textContent: v }))));
+  $("r-card-panel").hidden = !cardUrl;
+  if (cardUrl) $("r-card").src = `${cardUrl}?t=${Date.now()}`;
+  $("r-toggles").replaceChildren(...review.toggles.map(([k, v]) => {
+    const cls = /^OFF/.test(v) ? "off" : /^ON/.test(v) ? "on" : "other";
+    return el("tr", {}, el("td", { textContent: k }), el("td", {}, el("span", { className: `pill ${cls}`, textContent: v })));
+  }));
+  const icon = { pass: "✓", warn: "!", fail: "✕" };
+  $("r-checks").replaceChildren(...review.checks.map((c) =>
+    el("li", { className: c.status }, el("span", { className: "icon", textContent: icon[c.status] }),
+      el("div", {}, el("strong", { textContent: c.label }), el("small", { textContent: c.detail })))));
+  const blocked = !review.publishable;
+  $("publish").disabled = blocked;
+  $("publish").textContent = blocked ? "FIX FAILED CHECKS TO PUBLISH" : options.mode === "LIVE" ? "PUBLISH CAMPAIGN" : "PUBLISH CAMPAIGN (DRY RUN)";
+  $("publish-msg").hidden = true;
+  $("review").hidden = false;
+  $("review").scrollIntoView({ behavior: "smooth" });
+}
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("form-msg").hidden = true;
+  $("problems").hidden = true;
+  $("review").hidden = true;
+  $("prepare").disabled = true;
+  $("status").textContent = "Downloading videos, making the display card, checking the account…";
+  try {
+    const { id, review, cardUrl } = await api("/api/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formInput()) });
+    preparedId = id;
+    $("status").textContent = "";
+    renderReview(review, cardUrl);
+  } catch (err) {
+    $("status").textContent = "";
+    msg($("form-msg"), "bad", err.message);
+    if (err.data?.problems?.length) showProblems(err.data.problems);
+  } finally {
+    $("prepare").disabled = false;
+  }
+});
+
+$("publish").addEventListener("click", async () => {
+  const live = options.mode === "LIVE";
+  if (live && !confirm(`Publish "${$("r-name").textContent}" now? It goes live and starts spending immediately.`)) return;
+  $("publish").disabled = true;
+  $("publish").textContent = "PUBLISHING…";
+  try {
+    const r = await api("/api/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: preparedId }) });
+    msg($("publish-msg"), "good", r.dryRun
+      ? `Dry run complete — ${r.requests} requests recorded, nothing sent to TikTok.`
+      : `Live! Campaign ${r.campaignId} · ad group ${r.adGroupId} · ${r.adIds.length} ad(s).`);
+    $("publish").textContent = r.dryRun ? "DRY RUN DONE" : "PUBLISHED";
+  } catch (err) {
+    msg($("publish-msg"), "bad", err.message);
+    $("publish").disabled = false;
+    $("publish").textContent = "PUBLISH CAMPAIGN";
+  }
+});
+
+init().catch((e) => msg($("form-msg"), "bad", `Couldn't start: ${e.message}`));
+</script>
+</body>
+</html>

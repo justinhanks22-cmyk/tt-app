@@ -110,3 +110,13 @@ export class RestGateway extends BaseGateway {
 export function isDryRun(x: unknown): x is DryRunRecord {
   return typeof x === "object" && x !== null && (x as DryRunRecord).dryRun === true;
 }
+
+/** Records every call (reads included) and sends nothing. For dry runs and demos. */
+export class RecordingGateway implements Gateway {
+  readonly recorded: DryRunRecord[] = [];
+  async call<T>(op: Operation, payload: Record<string, unknown>): Promise<T | DryRunRecord> {
+    const r: DryRunRecord = { dryRun: true, operation: op, payload, fakeId: `DRYRUN-${op}-${this.recorded.length + 1}` };
+    this.recorded.push(r);
+    return r;
+  }
+}

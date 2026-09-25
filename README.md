@@ -18,7 +18,7 @@ is approved. Only videos you own or are licensed to use are processed.
 | 2. Pull advertisers, pixels, campaigns, display cards | ✅ see `docs/account-audit.md` |
 | 3. Campaign creation (dry run) | ✅ `npm run plan -- --request examples/poncho-request.json` |
 | 4. Spark creative handling + display-card generation | ✅ built (dry run); needs the upload token to go live |
-| 5. Simple interface | — |
+| 5. Simple interface | ✅ `npm run app` → http://localhost:5177 |
 | 6. Full dry-run test | — |
 | 7. Real publishing (after approval) | — |
 
@@ -86,6 +86,26 @@ ad (Spark Ads Push) with the original caption → attach the price card.
   server can't send file bytes.
 
 Example: `npm run plan -- --request examples/link-request.json`
+
+## Interface (Phase 5)
+
+```bash
+npm run app                                          # live reads via the TikTok MCP server
+npm run app -- --demo test/fixtures/poncho-live.json # no TikTok connection needed
+```
+
+Open http://localhost:5177 (it only listens on your own computer). Fill in
+the product, TikTok links, price, accounts, pixel (newest first, flagged if
+Add to Cart isn't set up), landing page, budget and ad copy, tick the
+permission box, then **Prepare Campaign**. The app downloads the videos (or
+asks for the file when TikTok blocks a link), makes the display card, and
+checks everything against your live account. The review screen shows every
+setting, the card, every optional TikTok feature ON/OFF, and all safety
+checks. **PUBLISH CAMPAIGN** is disabled while any check fails. A review
+expires after 30 minutes. The badge shows DRY RUN until Phase 7 enables
+real publishing.
+
+Screenshots: `docs/screenshots/`.
 
 ## Files
 
