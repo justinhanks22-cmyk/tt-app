@@ -33,6 +33,23 @@ Order of preference for every step: **TikTok MCP → Marketing API → browser a
 | 14 | Publish | Check the catalog | Create with `operation_status` = `DISABLE`, then enable via `campaign/status/update` (SDK-verified path) | No | Phase 7 only, after your approval |
 | 15 | Status / review results | Check the catalog | SDK-verified `campaign/get`, `adgroup/get`, `ad/get`, and reporting | No | Phase 7 |
 
+## MCP tools confirmed in the connected server (2026-09-25)
+
+Read-only calls used so far: `auth_advertiser_get`, `advertiser_info_get`, `pixel_list_get`, `identity_get`.
+
+| Step | MCP tool(s) now known to exist |
+|---|---|
+| Ad accounts | `auth_advertiser_get`, `advertiser_info_get` |
+| Pixels | `pixel_list_get` (Add to Cart pixel event type is `ON_WEB_CART`, as seen in live data) |
+| Spark identity / post | `identity_get`, `identity_video_get`, `identity_video_info_get`, `tt_video_authorize_apply`, `tt_video_info_get`, `tt_video_list_get` |
+| Video upload (Spark Ads Push) | `file_video_ad_upload`, `file_video_ad_info_get` |
+| Display cards | `creative_portfolio_list_get`, `creative_portfolio_get` (`ad_create.card_id` accepts a Display Card portfolio ID) |
+| Campaign / ad group / ad | `campaign_create`, `adgroup_create`, `ad_create` (+ `_get`, `_status_update`) |
+| Optional enhancements | `ad_create.creative_auto_enhancement_strategy_list` (`VIDEO_QUALITY`, `MUSIC_REFRESH`, `IMAGE_QUALITY`, `IMAGE_RESIZE`), so pass `[]` to keep the creative untouched |
+| Placements | `tiktok_inventory_filters_get` / `_update`, `pangle_block_list_get` |
+| Review / status | `ad_review_info_get`, `adgroup_review_info_get`, `campaign_get` |
+| Organic TikTok posting | **none**. The Ads MCP has no tool that posts to a TikTok profile |
+
 ## Verified live against the MCP server (2026-09-25)
 
 - `POST https://business-api.tiktok.com/open_mcp/tt-ads-mcp-flat` without a token

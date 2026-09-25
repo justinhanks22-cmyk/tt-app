@@ -1,5 +1,12 @@
 {
-  "advertisers": [],
+  "advertisers": [
+    {
+      "advertiserId": "7360920068810702864",
+      "name": "Relakia0423",
+      "currency": "USD",
+      "timezone": "America/New_York"
+    }
+  ],
   "postingAccounts": [],
   "pixels": [],
   "displayCards": [],
