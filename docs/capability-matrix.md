@@ -33,6 +33,19 @@ Order of preference for every step: **TikTok MCP → Marketing API → browser a
 | 14 | Publish | Check the catalog | Create with `operation_status` = `DISABLE`, then enable via `campaign/status/update` (SDK-verified path) | No | Phase 7 only, after your approval |
 | 15 | Status / review results | Check the catalog | SDK-verified `campaign/get`, `adgroup/get`, `ad/get`, and reporting | No | Phase 7 |
 
+## Verified live against the MCP server (2026-09-25)
+
+- `POST https://business-api.tiktok.com/open_mcp/tt-ads-mcp-flat` without a token
+  returns `401` with `WWW-Authenticate: Bearer resource_metadata=…`.
+- Protected-resource metadata: authorization server
+  `…/open_mcp/tt-ads-mcp-flat/oauth`, scope `mcp:tt4b`, bearer token in header.
+- Authorization-server metadata: dynamic client registration
+  (`…/oauth/register`), PKCE `S256`, public clients (`token_endpoint_auth_method: none`),
+  `authorization_code` + `refresh_token` grants, and the user approves at
+  `https://business-api.tiktok.com/portal/mcp-tt4b-authorize`.
+- `src/tiktok/mcpClient.ts` runs discovery and registration and gets a valid
+  approval URL. The only step left is the user approving it in a browser.
+
 ## Open questions to resolve against the live docs
 
 1. Exact enum values: `objective_type` for a website-conversion campaign,
