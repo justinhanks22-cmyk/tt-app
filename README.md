@@ -14,10 +14,10 @@ is approved. Only videos you own or are licensed to use are processed.
 
 | Phase | Status |
 |---|---|
-| 1. Connect MCP + read Ads account | Code done. Waiting on credentials and network access |
-| 2. Pull advertisers, pixels, campaigns, display cards | next |
-| 3. Campaign creation (dry run) | — |
-| 4. Spark creative handling | — |
+| 1. Connect MCP + read Ads account | ✅ verified via the official TikTok MCP connector |
+| 2. Pull advertisers, pixels, campaigns, display cards | ✅ see `docs/account-audit.md` |
+| 3. Campaign creation (dry run) | ✅ `npm run plan -- --request examples/poncho-request.json` |
+| 4. Spark creative handling + display-card generation | next |
 | 5. Simple interface | — |
 | 6. Full dry-run test | — |
 | 7. Real publishing (after approval) | — |
@@ -47,6 +47,20 @@ npm run verify:mcp   # saves the real tool catalog to logs/mcp-tools.json and re
 2. Put `TIKTOK_APP_ID` / `TIKTOK_APP_SECRET` in `.env`.
 3. `npm run auth:api`: approve via the app's advertiser authorization URL, then paste the `auth_code`.
 4. `npm run verify:api`: lists authorized ad accounts and saves them to `config/settings.json`.
+
+## Campaign flow (Phase 3)
+
+Your original Ads Manager flow, as an Upgraded Smart+ campaign: Sales → Website,
+catalog campaign OFF, $50/day campaign budget, Maximum Delivery, the pixel you
+pick, Add to Cart, TikTok placement only (Pangle, Global App Bundle, Lemon8 and
+PineDrama off), start now, audiences automatic, no products, no catalog video
+or image ads, no recommendations or enhancements, one Spark ad per post
+(caption kept), and the exact-price display card.
+
+`src/campaign/plan.ts` builds the payloads. `src/campaign/validate.ts` runs the
+15 safety checks plus a caption-price warning. `src/campaign/run.ts` creates
+campaign → ad group → ads, all **DISABLED**; `publishCampaign()` stays locked
+until Phase 7.
 
 ## Files
 

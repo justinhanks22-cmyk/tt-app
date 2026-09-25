@@ -6,6 +6,11 @@ import { marketingApiToken, readSecret, writeSecret } from "../config/secrets.js
 import { log } from "../log/logger.js";
 import { API_BASE, MarketingApiClient, writesEnabled } from "../tiktok/marketingApi.js";
 import { callMcpTool, connectMcp, DEFAULT_MCP_URL } from "../tiktok/mcpClient.js";
+import { readFileSync } from "node:fs";
+import { planCampaign, type CampaignRequest } from "../campaign/plan.js";
+import { buildCampaign, reviewSummary } from "../campaign/run.js";
+import { fetchLiveFacts, validateCampaign, type LiveFacts } from "../campaign/validate.js";
+import { McpGateway, type Gateway, type DryRunRecord } from "../tiktok/gateway.js";
 
 try {
   process.loadEnvFile(".env");
@@ -137,7 +142,67 @@ async function verifyMcp(): Promise<void> {
   await client.close();
 }
 
+function arg(name: string): string | undefined {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > 0 ? process.argv[i + 1] : undefined;
+}
+
+/**
+ * Phase 3: plan a campaign, validate it, and build it in DRY RUN.
+ *   plan --request req.json [--facts live.json]
+ * Without --facts, live facts are read through the MCP server (read-only).
+ */
+async function plan(): Promise<void> {
+  const reqPath = arg("request");
+  if (!reqPath) throw new Error("Usage: plan --request <file.json> [--facts <live.json>]");
+  const request = JSON.parse(readFileSync(reqPath, "utf8")) as CampaignRequest;
+  const settings = loadSettings();
+  const campaignPlan = planCampaign(settings, request);
+
+  // Writes are always recorded, never sent, from this command.
+  const recorder: Gateway = {
+    recorded: [] as DryRunRecord[],
+    async call(op, payload) {
+      const r: DryRunRecord = { dryRun: true, operation: op, payload, fakeId: `DRYRUN-${op}-${this.recorded.length + 1}` };
+      this.recorded.push(r);
+      return r;
+    },
+  };
+  let live: LiveFacts;
+  const factsPath = arg("facts");
+  if (factsPath) {
+    live = JSON.parse(readFileSync(factsPath, "utf8")) as LiveFacts;
+  } else {
+    const client = await connectMcp();
+    live = await fetchLiveFacts(new McpGateway(client), campaignPlan);
+    await client.close();
+  }
+
+  const checks = validateCampaign(campaignPlan, settings, live);
+  const review = reviewSummary(campaignPlan, checks);
+  const pad = Math.max(...review.rows.map(([k]) => k.length), ...review.toggles.map(([k]) => k.length));
+  console.log("\n=== REVIEW ===");
+  for (const [k, v] of review.rows) console.log(`${k.padEnd(pad)}  ${v}`);
+  console.log("\n--- Optional TikTok features ---");
+  for (const [k, v] of review.toggles) console.log(`${k.padEnd(pad)}  ${v}`);
+  console.log("\n--- Safety checks ---");
+  const icon = { pass: "✔", warn: "⚠", fail: "✘" } as const;
+  for (const c of checks) console.log(`${icon[c.status]} ${String(c.id).padStart(2)} ${c.label} — ${c.detail}`);
+
+  if (!review.publishable) {
+    console.log("\n✘ NOT PUBLISHABLE — fix the failed checks above. Nothing was created.");
+    process.exitCode = 1;
+    return;
+  }
+  const result = await buildCampaign(recorder, campaignPlan, checks);
+  mkdirSync("logs", { recursive: true });
+  const out = `logs/dryrun-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  writeFileSync(out, JSON.stringify({ plan: campaignPlan, checks, requests: recorder.recorded, result }, null, 2));
+  console.log(`\n✔ DRY RUN complete: ${recorder.recorded.length} requests recorded, none sent → ${out}`);
+}
+
 const commands: Record<string, () => Promise<void>> = {
+  plan,
   doctor,
   "auth:api": authApi,
   "verify:api": verifyApi,

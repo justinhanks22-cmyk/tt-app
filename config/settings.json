@@ -16,16 +16,20 @@
     }
   ],
   "displayCards": [],
-  "landingPageDomains": [],
+  "landingPageDomains": [
+    "ashandbloom.store"
+  ],
   "defaults": {
     "dailyBudget": 50,
-    "budgetLevel": "campaign",
-    "delivery": "Maximum Delivery",
-    "optimizationEvent": "Add to Cart",
-    "adCopy": "Sale ends at midnight!",
-    "placements": [
-      "TikTok"
-    ]
+    "optimizationEvent": "ON_WEB_CART",
+    "locationIds": [
+      "6252001"
+    ],
+    "audienceAge": "ALL",
+    "commentDisabled": true,
+    "videoDownloadDisabled": true,
+    "ctaPortfolioId": "7689257320064322567",
+    "oneAdPerCreative": true
   },
   "naming": {
     "campaignTemplate": "{product} | ${price} | SPARK | {event} | {date}",
@@ -33,7 +37,8 @@
     "adTemplate": "{product} | creative {n}",
     "dateFormat": "MM-dd",
     "eventAbbreviations": {
-      "Add to Cart": "ATC"
-    }
+      "ON_WEB_CART": "ATC"
+    },
+    "timezone": "America/New_York"
   }
 }

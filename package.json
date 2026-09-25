@@ -13,6 +13,7 @@
     "auth:mcp": "tsx src/cli/index.ts auth:mcp",
     "verify:api": "tsx src/cli/index.ts verify:api",
     "verify:mcp": "tsx src/cli/index.ts verify:mcp",
+    "plan": "tsx src/cli/index.ts plan",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

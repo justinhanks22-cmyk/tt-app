@@ -35,13 +35,23 @@ export const DisplayCardSchema = z
   })
   .refine((c) => c.price !== undefined || c.offer !== undefined, "a display card needs a price or an offer key");
 
+/**
+ * Product-test defaults: Upgraded Smart+ "Sales → Website" campaign, catalog
+ * off, Maximum Delivery, TikTok-only placement, audiences left automatic,
+ * no products, no catalog creatives, no recommendations/enhancements.
+ * Values not specified by the user mirror the live "poncho" campaign.
+ */
 export const DefaultsSchema = z.object({
   dailyBudget: z.number().positive().default(50),
-  budgetLevel: z.literal("campaign").default("campaign"),
-  delivery: z.literal("Maximum Delivery").default("Maximum Delivery"),
-  optimizationEvent: z.string().default("Add to Cart"),
-  adCopy: z.string().default("Sale ends at midnight!"),
-  placements: z.array(z.literal("TikTok")).default(["TikTok"]),
+  optimizationEvent: z.string().default("ON_WEB_CART"), // Add to Cart
+  locationIds: z.array(z.string()).default(["6252001"]), // United States
+  audienceAge: z.enum(["ALL", "OVER_EIGHTEEN", "OVER_TWENTY_FIVE"]).default("ALL"),
+  commentDisabled: z.boolean().default(true),
+  videoDownloadDisabled: z.boolean().default(true),
+  // Dynamic CTA portfolio required for Spark ads on TikTok placement.
+  ctaPortfolioId: z.string().default("7689257320064322567"),
+  // One ad per creative (true) or one ad holding all creatives (false).
+  oneAdPerCreative: z.boolean().default(true),
 });
 
 export const NamingSchema = z.object({
@@ -50,7 +60,8 @@ export const NamingSchema = z.object({
   adGroupTemplate: z.string().default("{product} | ${price} | {event}"),
   adTemplate: z.string().default("{product} | creative {n}"),
   dateFormat: z.string().default("MM-dd"),
-  eventAbbreviations: z.record(z.string(), z.string()).default({ "Add to Cart": "ATC" }),
+  eventAbbreviations: z.record(z.string(), z.string()).default({ ON_WEB_CART: "ATC" }),
+  timezone: z.string().default("America/New_York"),
 });
 
 export const SettingsSchema = z.object({
