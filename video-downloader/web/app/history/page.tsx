@@ -1,0 +1,8 @@
+import type { Metadata } from "next";
+import History from "@/components/History";
+
+export const metadata: Metadata = { title: "My videos · Video Downloader" };
+
+export default function HistoryPage() {
+  return <History />;
+}

@@ -1,0 +1,11 @@
+# Public entry point. Set SITE_ADDRESS to your domain (e.g. dl.example.com) for automatic HTTPS.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+	request_body {
+		max_size 16KB
+	}
+	reverse_proxy web:3000 {
+		# Overwrite (never append to) any client-supplied value; the web tier trusts this header.
+		header_up X-Forwarded-For {remote_host}
+	}
+}

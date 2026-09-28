@@ -6,6 +6,10 @@ CBO campaign → ad group → Spark ads with display cards). It uses the
 and browser automation only where neither can do a step. See
 [`docs/capability-matrix.md`](docs/capability-matrix.md).
 
+> This repository also contains a separate, self-contained app:
+> [`video-downloader/`](video-downloader/README.md), a public-video-to-MP4 downloader
+> (Next.js + FastAPI + yt-dlp + FFmpeg) with 24-hour automatic deletion.
+
 **Safety:** every write request is logged and *not sent* unless
 `TT_WRITES_ENABLED=I_APPROVED_PUBLISHING`. Nothing is published before Phase 7
 is approved. Only videos you own or are licensed to use are processed.

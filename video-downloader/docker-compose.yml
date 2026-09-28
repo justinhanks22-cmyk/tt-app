@@ -1,0 +1,75 @@
+# Production-style stack:  Caddy (edge) → Next.js (web) → FastAPI (api) ← worker(s) → Postgres
+# Only Caddy publishes ports. Files live on the shared "media" volume (or S3/R2 if configured).
+name: video-downloader
+
+x-backend: &backend
+  build: ./api
+  env_file: .env
+  environment: &backend-env
+    DATABASE_URL: postgresql://vdl:${POSTGRES_PASSWORD:-vdl}@db:5432/vdl
+    RUN_EMBEDDED_WORKER: "false"
+    ENVIRONMENT: production
+  volumes:
+    - media:/data
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+      - "${HTTPS_PORT:-8443}:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [web]
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    environment:
+      API_INTERNAL_URL: http://api:8000
+      INTERNAL_PROXY_TOKEN: ${INTERNAL_PROXY_TOKEN:?set INTERNAL_PROXY_TOKEN in .env}
+      TRUSTED_PROXY_HOPS: "1"
+    depends_on: [api]
+    restart: unless-stopped
+
+  api:
+    <<: *backend
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker_main"]
+    healthcheck:
+      disable: true
+    # Media processing is the heavy part: scale with `docker compose up --scale worker=3`.
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vdl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vdl}
+      POSTGRES_DB: vdl
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vdl -d vdl"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  media:
+  pgdata:
+  caddy-data:
