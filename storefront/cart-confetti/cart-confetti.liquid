@@ -1,0 +1,71 @@
+{% comment %} Add-to-cart confetti. Render once in layout/theme.liquid, just before </body>: {% render 'cart-confetti' %} {% endcomment %}
+<script>
+/* Cart confetti: a small burst from the Add to Cart button. No dependencies. */
+(function () {
+  if (window.__cartConfetti) return;
+  window.__cartConfetti = true;
+
+  var COLORS = ['#111111', '#ff3b5c', '#ffb800', '#25d0c4', '#ffffff'];
+  var COUNT = 22;
+  var BUTTONS = [
+    'button[name="add"]',
+    'form[action*="/cart/add"] [type="submit"]',
+    '.product-form__submit',
+    '[data-add-to-cart]'
+  ].join(',');
+
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function pop(btn) {
+    if (!btn.animate) return;
+    btn.animate(
+      [{ transform: 'scale(1)' }, { transform: 'scale(0.94)' }, { transform: 'scale(1.04)' }, { transform: 'scale(1)' }],
+      { duration: 380, easing: 'cubic-bezier(.3,.7,.4,1)' }
+    );
+  }
+
+  function burst(btn) {
+    var r = btn.getBoundingClientRect();
+    var x = r.left + r.width / 2;
+    var y = r.top + r.height / 2;
+
+    for (var i = 0; i < COUNT; i++) {
+      var p = document.createElement('span');
+      var size = 5 + Math.random() * 5;
+      var round = Math.random() < 0.4;
+      var color = COLORS[i % COLORS.length];
+      p.style.cssText =
+        'position:fixed;left:' + x + 'px;top:' + y + 'px;width:' + size + 'px;height:' +
+        (round ? size : size * 0.45) + 'px;background:' + color + ';border-radius:' +
+        (round ? '50%' : '1px') + ';pointer-events:none;z-index:2147483647;will-change:transform,opacity;' +
+        (color === '#ffffff' ? 'box-shadow:0 0 0 1px rgba(0,0,0,.12);' : '');
+      document.body.appendChild(p);
+
+      // Fan upward from the button, then fall a little with gravity.
+      var angle = (-90 + (Math.random() * 140 - 70)) * Math.PI / 180;
+      var dist = 60 + Math.random() * 70;
+      var dx = Math.cos(angle) * dist;
+      var dy = Math.sin(angle) * dist;
+      var spin = (Math.random() * 2 - 1) * 540;
+      var dur = 700 + Math.random() * 400;
+
+      var anim = p.animate(
+        [
+          { transform: 'translate(-50%,-50%) translate(0,0) rotate(0deg) scale(0.6)', opacity: 1 },
+          { transform: 'translate(-50%,-50%) translate(' + dx + 'px,' + dy + 'px) rotate(' + spin / 2 + 'deg) scale(1)', opacity: 1, offset: 0.45 },
+          { transform: 'translate(-50%,-50%) translate(' + dx * 1.25 + 'px,' + (dy + 70) + 'px) rotate(' + spin + 'deg) scale(0.9)', opacity: 0 }
+        ],
+        { duration: dur, easing: 'cubic-bezier(.15,.65,.35,1)', fill: 'forwards' }
+      );
+      anim.onfinish = (function (el) { return function () { el.remove(); }; })(p);
+    }
+  }
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest(BUTTONS);
+    if (!btn || btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
+    pop(btn);
+    if (!reduced) burst(btn);
+  }, true);
+})();
+</script>
